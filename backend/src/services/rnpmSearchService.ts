@@ -104,6 +104,17 @@ async function searchWithFreshSession(
 // Optiunea B (auto-split pe tipInscriere) — nu inca implementat.
 const MAX_TOTAL_RESULTS = 1500;
 
+// Recuperarea detaliilor e best-effort. Cand RNPM ramane lent, a doua trecere nu
+// are voie sa dubleze la nesfarsit durata cautarii — bulk si split ruleaza pe
+// pana la MAX_TOTAL_RESULTS avize, iar transportul in flux are si el un plafon.
+// Bugetul se verifica INAINTE de fiecare transa, deci o transa pornita se
+// termina; 0 dezactiveaza complet recuperarea (kill switch operational).
+const DEFAULT_RECOVERY_BUDGET_MS = 120_000;
+function recoveryBudgetMs(): number {
+  const raw = Number.parseInt(process.env.RNPM_RECOVERY_BUDGET_MS ?? "", 10);
+  return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_RECOVERY_BUDGET_MS;
+}
+
 // v2.20.3 Grupul I — fail-fast pe silent_refusal consecutiv. Daca primii K
 // sub-tipuri din tier-1 returneaza `total > 0 && documents: []` consecutiv,
 // upstream-ul e plauzibil throttling/captcha-invalidating wholesale: nu mai are
@@ -327,6 +338,43 @@ async function executeSearchInner(
   const allDocs: RnpmDocument[] = [];
   const avizIds: (number | null)[] = [];
   const detailsFailed: string[] = [];
+  // Avizele care au esuat si POT fi reincercate. Cele fara `identificator.k` nu
+  // intra: nu exista uuid de cerut, deci o reincercare ar fi cerere gunoi.
+  const recoverable: { doc: RnpmDocument; idx: number }[] = [];
+
+  // Extras ca sa fie folosit identic de trecerea normala si de cea de
+  // recuperare. Contine si `doc.activ` — daca recuperarea nu ar relua-o, avizul
+  // s-ar salva dar ar ramane afisat "Necunoscut", adica exact simptomul reparat.
+  const fetchAndPersist = async (doc: RnpmDocument, localIdx: number) => {
+    if (!doc.identificator.k) return { localIdx, doc, ok: false as const };
+    try {
+      const detail = await client.fetchFullDetail(doc.identificator.k, signal);
+      // Fetch-ul poate sa se fi intors inainte ca abort-ul sa-l ajunga.
+      // Verificam explicit ca sa nu scriem in SQLite dupa ce user-ul a oprit cautarea.
+      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      if (typeof detail.part1?.activ === "boolean") doc.activ = detail.part1.activ;
+      // Audit 2026-04-29 #8: scrierea SQLite trebuie sa fie bracketata de
+      // maintenance lock pentru a coopera cu restoreFromBackup. Wrap-ul e
+      // sub-ms (saveAvizFull e sync better-sqlite3); fetch-ul HTTP de mai
+      // sus ramane intentionat in afara, ca un user care opreste sa nu
+      // ramana prins in lock-ul reader pe latenta upstream.
+      // Re-verificam abortul DUPA achizitia lock-ului, nu doar inainte de
+      // coada: cand un writer (backup/compact/restore) tine lock-ul,
+      // asteptarea aici poate dura minute, iar clientul poate pleca in
+      // acest timp. Politica: dupa ce abortul e observat nu se mai fac
+      // scrieri NOI; ce s-a persistat deja ramane, pentru recuperarea
+      // starii partiale via /saved.
+      const avizId = await withMaintenanceRead(async () => {
+        if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+        return persistAvizWithDetail(doc, detail, input.type, ownerId, searchId);
+      });
+      return { localIdx, doc, ok: true as const, avizId };
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") throw e;
+      console.error(`[rnpm detail fail] ${doc.identificator.v}:`, e instanceof Error ? e.message : e);
+      return { localIdx, doc, ok: false as const };
+    }
+  };
 
   const processPage = async (docs: RnpmDocument[]) => {
     const baseIdx = allDocs.length;
@@ -337,30 +385,7 @@ async function executeSearchInner(
       throwIfAborted(signal);
       const tBatch = Date.now();
       const batchResults = await Promise.all(
-        docs.slice(i, i + concurrency).map(async (doc, batchIdx) => {
-          const localIdx = i + batchIdx;
-          if (!doc.identificator.k) return { localIdx, doc, ok: false as const };
-          try {
-            const detail = await client.fetchFullDetail(doc.identificator.k, signal);
-            // Fetch-ul poate sa se fi intors inainte ca abort-ul sa-l ajunga.
-            // Verificam explicit ca sa nu scriem in SQLite dupa ce user-ul a oprit cautarea.
-            if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-            if (typeof detail.part1?.activ === "boolean") doc.activ = detail.part1.activ;
-            // Audit 2026-04-29 #8: scrierea SQLite trebuie sa fie bracketata de
-            // maintenance lock pentru a coopera cu restoreFromBackup. Wrap-ul e
-            // sub-ms (saveAvizFull e sync better-sqlite3); fetch-ul HTTP de mai
-            // sus ramane intentionat in afara, ca un user care opreste sa nu
-            // ramana prins in lock-ul reader pe latenta upstream.
-            const avizId = await withMaintenanceRead(async () =>
-              persistAvizWithDetail(doc, detail, input.type, ownerId, searchId)
-            );
-            return { localIdx, doc, ok: true as const, avizId };
-          } catch (e) {
-            if (e instanceof DOMException && e.name === "AbortError") throw e;
-            console.error(`[rnpm detail fail] ${doc.identificator.v}:`, e instanceof Error ? e.message : e);
-            return { localIdx, doc, ok: false as const };
-          }
-        })
+        docs.slice(i, i + concurrency).map((doc, batchIdx) => fetchAndPersist(doc, i + batchIdx))
       );
       const dt = Date.now() - tBatch;
       detailsMs += dt;
@@ -372,6 +397,7 @@ async function executeSearchInner(
           okCount++;
         } else {
           detailsFailed.push(r.doc.identificator.v);
+          if (r.doc.identificator.k) recoverable.push({ doc: r.doc, idx: baseIdx + r.localIdx });
           failCount++;
         }
       }
@@ -442,6 +468,57 @@ async function executeSearchInner(
     }
     await processPage(r.documents);
     rnpmPage++;
+  }
+
+  // O SINGURA trecere de recuperare peste avizele esuate, cu buget nou.
+  //
+  // Episoadele de lentoare la RNPM sunt tranzitorii: masurat in productie
+  // 2026-08-01, o cautare a pierdut 24 din 25 de avize, iar un minut mai tarziu
+  // aceeasi cautare a adus 25 din 25 in 6,6 secunde. Fara recuperare, avizele
+  // afectate se pierd COMPLET — nu se salveaza deloc si apar "Necunoscut".
+  //
+  // Cost captcha: ZERO. Cererile de detaliu merg pe uuid, nu pe gcode.
+  // Nu e bucla: o singura trecere, ca sa nu dublam durata la nesfarsit.
+  if (recoverable.length > 0 && !signal?.aborted) {
+    const tRecovery = Date.now();
+    const pending = recoverable.splice(0, recoverable.length);
+    const budgetMs = recoveryBudgetMs();
+    let recovered = 0;
+    let skipped = 0;
+    for (let i = 0; i < pending.length; i += concurrency) {
+      throwIfAborted(signal);
+      if (Date.now() - tRecovery >= budgetMs) {
+        skipped = pending.length - i;
+        break;
+      }
+      const slice = pending.slice(i, i + concurrency);
+      const results = await Promise.all(slice.map((entry) => fetchAndPersist(entry.doc, entry.idx)));
+      for (const r of results) {
+        if (!r.ok) continue;
+        avizIds[r.localIdx] = r.avizId;
+        recovered++;
+        // `detailsFailed` a fost populat in trecerea normala; scoatem ce am recuperat.
+        const at = detailsFailed.indexOf(r.doc.identificator.v);
+        if (at >= 0) detailsFailed.splice(at, 1);
+      }
+    }
+    // Contoarele sumarului trebuie recalculate, altfel `rnpm_search` ar raporta
+    // esecuri pentru avize care intre timp au fost recuperate — exact
+    // ambiguitatea care a costat o zi de investigatie.
+    detailsOk += recovered;
+    detailsFailedCount -= recovered;
+    logRnpmEvent({
+      action: "rnpm_phase",
+      phase: "details_recovery",
+      searchType: input.type,
+      size: pending.length,
+      ok: recovered,
+      failed: pending.length - recovered - skipped,
+      // Explicit, nu implicit: o taiere tacuta a bugetului ar arata in log
+      // identic cu "am incercat tot si a esuat".
+      skipped,
+      latencyMs: Date.now() - tRecovery,
+    });
   }
 
   const nextRnpmPage = rnpmPage <= pagesTotalClamped ? rnpmPage : null;

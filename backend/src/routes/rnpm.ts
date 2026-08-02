@@ -188,6 +188,154 @@ const inflightTimers = new Map<string, ReturnType<typeof setTimeout>>();
 // retry-ul clientului pornea o a doua cautare CONCURENTA cu originalul
 // (captcha platit dublu, randuri saved-search duplicate).
 export const INFLIGHT_TTL_SEARCH_MS = 900_000;
+
+// Heartbeat pe fluxul de /search. Rol dublu: tine conexiunea vie pentru
+// intermediari si detecteaza clientul plecat — scrierea esueaza si abortam.
+const SEARCH_STREAM_PING_MS = 10_000;
+
+// Plafon dur pe fluxul de /search. Aliniat cu TTL-ul de dedup, ca o cerere
+// intepenita sa nu supravietuiasca cheii ei de idempotenta.
+const SEARCH_STREAM_TIMEOUT_MS = INFLIGHT_TTL_SEARCH_MS;
+
+// Corpul de succes se construieste camp cu camp, NU prin spread peste rezultatul
+// serviciului: `ExecuteSearchResult` are campuri interne care nu se expun (ex.
+// `captchasUsed`). Pinuit de rnpm.searchPayload.characterization.test.ts.
+function searchSuccessPayload(result: Awaited<ReturnType<typeof executeSearch>>) {
+  return {
+    searchId: result.searchId,
+    total: result.total,
+    pagesTotal: result.pagesTotal,
+    pageSize: result.pageSize,
+    currentPage: result.currentPage,
+    criteriu: result.criteriu,
+    documents: result.documents,
+    avizIds: result.avizIds,
+    detailsFailed: result.detailsFailed,
+    gcode: result.gcode,
+    nextRnpmPage: result.nextRnpmPage,
+  };
+}
+
+function wantsEventStream(c: import("hono").Context): boolean {
+  return (c.req.header("accept") ?? "").toLowerCase().includes("text/event-stream");
+}
+
+// Erorile tardive (dupa ce headerele au plecat) nu mai pot folosi statusul HTTP,
+// deci calatoresc in corp. Envelope-ul e IDENTIC cu cel de pe calea JSON, ca
+// frontendul sa reconstruiasca exact aceleasi obiecte de eroare — inclusiv codul
+// PUBLIC `QUOTA_EXCEEDED` pentru limita de stocare, nu cel intern.
+function searchErrorEvent(
+  e: unknown,
+  c: import("hono").Context,
+  type: RnpmSearchType
+): { status: number; body: unknown } {
+  if (e instanceof RnpmError && e.code === "limit_exceeded") {
+    const total = typeof e.details?.total === "number" ? e.details.total : undefined;
+    const limit = typeof e.details?.limit === "number" ? e.details.limit : undefined;
+    return {
+      status: 400,
+      body: fail(ErrorCodes.LIMIT_EXCEEDED, e.message, c, { total, limit, splittable: { type } }),
+    };
+  }
+  if ((e as { code?: unknown })?.code === "RNPM_STORAGE_LIMIT") {
+    const err = e as Error & { usedBytes: number; limitBytes: number };
+    return {
+      status: 429,
+      body: fail(ErrorCodes.QUOTA_EXCEEDED, err.message, c, {
+        feature: "rnpm.storage",
+        usedBytes: err.usedBytes,
+        limitBytes: err.limitBytes,
+      }),
+    };
+  }
+  console.error("[rnpm/search]", e instanceof Error ? e.message : String(e));
+  return {
+    status: 500,
+    body: fail(
+      ErrorCodes.INTERNAL_ERROR,
+      "Eroare interna. Reincearca sau contacteaza administratorul cu requestId-ul din raspuns.",
+      c
+    ),
+  };
+}
+
+function streamSearchAsSSE(
+  c: import("hono").Context,
+  run: Promise<Awaited<ReturnType<typeof executeSearch>>>,
+  opts: {
+    type: RnpmSearchType;
+    dedupKey: string | null;
+    controller: AbortController;
+    onDone: () => void;
+  }
+) {
+  return streamSSE(c, async (stream) => {
+    // Scrierile trebuie serializate: un ping care pleaca in mijlocul scrierii
+    // terminale ar intercala `event: ping` in payload si ar sparge parsarea.
+    let pending: Promise<void> = Promise.resolve();
+    const ping = setInterval(() => {
+      pending = pending.then(() =>
+        stream.writeSSE({ event: "ping", data: "{}" }).catch((err) => {
+          // Detectia clientului plecat se face prin bridge-ul de semnal
+          // (`onRequestAbort` din ruta), NU prin esecul scrierii: `writeSSE` din
+          // Hono inghite erorile de scriere, deci acest catch nu se declanseaza
+          // pe versiunea curenta. Il pastram ca protectie daca Hono schimba
+          // comportamentul — atunci esecul devine si el semnal de client plecat.
+          // Motivul original (F06, audit 2026-07-09): un reject nemanipulat aici
+          // ar deveni unhandledRejection => process.exit(1) in server mode.
+          console.error("[rnpm/search] ping writeSSE failed (client disconnected?)", err);
+          opts.controller.abort();
+        })
+      );
+    }, SEARCH_STREAM_PING_MS);
+
+    // Plafon dur, ca la /bulk. Heartbeat-ul tine acum conexiunea vie la
+    // nesfarsit, deci o cautare intepenita (ex. coada pe un lock blocat) ar
+    // lasa utilizatorul cu rotita invartindu-se — inainte proxy-ul o taia.
+    const timeoutHandle = setTimeout(() => opts.controller.abort(), SEARCH_STREAM_TIMEOUT_MS);
+
+    try {
+      const result = await run;
+      clearInterval(ping);
+      await pending;
+      await stream.writeSSE({ event: "result", data: JSON.stringify(searchSuccessPayload(result)) });
+    } catch (e) {
+      clearInterval(ping);
+      await pending;
+      if (e instanceof DOMException && e.name === "AbortError") {
+        if (c.req.raw.signal?.aborted === true) {
+          // Clientul a plecat: nu exista cui livra un eveniment terminal, iar
+          // corpul s-ar scrie pe un socket inchis. Doar oprim si logam.
+          console.log("[rnpm/search] aborted by client");
+          return;
+        }
+        // Plafonul nostru a expirat, dar clientul e INCA acolo: ii datoram o
+        // eroare explicita, altfel ramane cu rotita invartindu-se.
+        console.error("[rnpm/search] stream timeout");
+        await stream
+          .writeSSE({
+            event: "error",
+            data: JSON.stringify({
+              status: 504,
+              body: fail(ErrorCodes.INTERNAL_ERROR, "Cautarea a depasit timpul maxim alocat. Reincearca.", c),
+            }),
+          })
+          .catch((err) => console.error("[rnpm/search] timeout writeSSE failed", err));
+        return;
+      }
+      const { status, body } = searchErrorEvent(e, c, opts.type);
+      await stream
+        .writeSSE({ event: "error", data: JSON.stringify({ status, body }) })
+        .catch((err) => console.error("[rnpm/search] error writeSSE failed", err));
+    } finally {
+      clearInterval(ping);
+      clearTimeout(timeoutHandle);
+      opts.onDone();
+      if (opts.dedupKey) clearInflight(opts.dedupKey);
+    }
+  });
+}
+
 export const INFLIGHT_TTL_BULK_MS = SSE_TIMEOUT_MS + 60_000;
 export const INFLIGHT_TTL_SPLIT_MS = SSE_SPLIT_TIMEOUT_MS + 60_000;
 
@@ -309,6 +457,22 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
   // pentru a afisa partial state din /saved).
   let createdSearchId: number | null = existingSearchId ?? null;
 
+  // Controller propriu, compus cu semnalul cererii. Pe calea JSON e echivalent
+  // cu semnalul brut; pe calea de flux e singurul mod prin care o scriere
+  // esuata (client plecat) poate opri efectiv munca — semnalul cererii nu poate
+  // fi abortat din cod.
+  const searchAbort = new AbortController();
+  const onRequestAbort = () => searchAbort.abort();
+  c.req.raw.signal?.addEventListener?.("abort", onRequestAbort);
+  // OBLIGATORIU dupa addEventListener: pe un semnal DEJA abortat listener-ul nu
+  // se declanseaza niciodata (spec DOM), iar `searchAbort` ar ramane pe veci
+  // ne-abortat. Fereastra e reala si larga — clientul poate pleca in timpul
+  // verificarii de stocare (asteptare pe lock de mentenanta, minute cand ruleaza
+  // backup-ul) sau al gardurilor de captcha, ambele inaintea acestei linii.
+  // Fara verificare, cautarea ruleaza pana la capat pentru nimeni: captcha
+  // platita, RNPM lovit, toate scrierile executate.
+  if (c.req.raw.signal?.aborted) searchAbort.abort();
+
   const run = executeSearch({
     type,
     params: params as Parameters<typeof executeSearch>[0]["params"],
@@ -323,7 +487,7 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
     batchSize: batch,
     existingGcode,
     existingSearchId,
-    signal: c.req.raw.signal,
+    signal: searchAbort.signal,
     storageLimitCheck: assertRnpmStorageWithinLimit,
     onSearchCreated: (sid) => {
       createdSearchId = sid;
@@ -331,21 +495,27 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
   });
   if (dedupKey) setInflight(dedupKey, INFLIGHT_TTL_SEARCH_MS, run);
 
+  // Transport in flux, negociat prin `Accept`. Motivul: ruta e sincrona si nu
+  // emite niciun byte pana nu termina tot (captcha + interogare + detalii), iar
+  // intermediarii taie tacerea — oauth2-proxy la `ResponseHeaderTimeout`,
+  // Cloudflare la propriul plafon — si utilizatorul primeste 502 desi cautarea
+  // era in regula. Cu SSE headerele pleaca imediat, deci nu mai exista tacere.
+  //
+  // Clientii care NU cer explicit `text/event-stream` primesc EXACT raspunsul de
+  // azi: taburi SPA deja deschise ruleaza JS vechi, iar consumatorii API/PAT nu
+  // trebuie rupti.
+  if (wantsEventStream(c)) {
+    return streamSearchAsSSE(c, run, {
+      type,
+      dedupKey,
+      controller: searchAbort,
+      onDone: () => c.req.raw.signal?.removeEventListener?.("abort", onRequestAbort),
+    });
+  }
+
   try {
     const result = await run;
-    return c.json({
-      searchId: result.searchId,
-      total: result.total,
-      pagesTotal: result.pagesTotal,
-      pageSize: result.pageSize,
-      currentPage: result.currentPage,
-      criteriu: result.criteriu,
-      documents: result.documents,
-      avizIds: result.avizIds,
-      detailsFailed: result.detailsFailed,
-      gcode: result.gcode,
-      nextRnpmPage: result.nextRnpmPage,
-    });
+    return c.json(searchSuccessPayload(result));
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") {
       console.log("[rnpm/search] aborted by client");
@@ -384,6 +554,7 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
     console.error("[rnpm/search]", msg);
     return internalError(c, "Eroare interna. Reincearca sau contacteaza administratorul cu requestId-ul din raspuns.");
   } finally {
+    c.req.raw.signal?.removeEventListener?.("abort", onRequestAbort);
     if (dedupKey) clearInflight(dedupKey);
   }
 });

@@ -22,6 +22,8 @@ export interface RnpmResultsTableResult {
   documents: RnpmDocument[];
   avizIds: (number | null)[];
   nextRnpmPage: number | null;
+  /** Identificatorii avizelor ramase fara detalii dupa reincercarea automata. */
+  detailsFailed?: string[];
 }
 
 export interface RnpmResultsTableProps {
@@ -263,6 +265,9 @@ export function RnpmResultsTable({
   const hasMore = result.nextRnpmPage != null;
   const exportCountLabel =
     selected.size > 0 ? `(${selected.size})` : matchedSet ? `(${sortedPairs.length} filtrate)` : "";
+  // Avize ramase fara detalii chiar si dupa reincercarea automata de pe server:
+  // in tabel arata identic cu un aviz al carui status chiar e necunoscut la sursa.
+  const failedCount = result.detailsFailed?.length ?? 0;
 
   return (
     <div className="space-y-3">
@@ -275,6 +280,14 @@ export function RnpmResultsTable({
               <span className="ml-1 text-amber-600">· {sortedPairs.length} dupa filtre</span>
             )}
           </span>
+          {failedCount > 0 && (
+            <span
+              className="font-medium text-red-600"
+              title={`Detaliile nu au putut fi aduse pentru: ${result.detailsFailed?.join(", ")}`}
+            >
+              · {failedCount === 1 ? "1 aviz fara detalii" : `${failedCount} avize fara detalii`}
+            </span>
+          )}
           {selected.size > 0 && <span className="font-medium text-violet-600">({selected.size} selectate)</span>}
         </div>
         <div className="flex items-center gap-2">

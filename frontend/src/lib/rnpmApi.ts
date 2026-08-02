@@ -164,6 +164,97 @@ export interface RnpmSearchOptions {
   captchaMode?: CaptchaMode;
 }
 
+// Reface, din envelope-ul primit prin flux, EXACT eroarea pe care calea JSON o
+// arunca azi. Tot ce e mai sus in aplicatie (mesaje, propunerea de split,
+// formatarea limitei de stocare) ramane neatins pentru ca tipurile sunt aceleasi.
+function throwSearchStreamError(payload: unknown, fallbackType: RnpmSearchType): never {
+  const wrapper = payload as { status?: number; body?: unknown };
+  const status = typeof wrapper.status === "number" ? wrapper.status : 500;
+  const envelope = wrapper.body as
+    | {
+        error?: { code?: string; message?: string; details?: Record<string, unknown> };
+        requestId?: string;
+      }
+    | undefined;
+  const msg = extractErrorMessage(wrapper.body, `Eroare server (${status})`);
+  const err = envelope?.error;
+
+  if (err?.code === "LIMIT_EXCEEDED") {
+    const details = err.details as { total?: number; limit?: number; splittable?: { type?: string } } | undefined;
+    const total = typeof details?.total === "number" ? details.total : undefined;
+    const limit = typeof details?.limit === "number" ? details.limit : undefined;
+    const splitType = (details?.splittable?.type as RnpmSearchType) ?? fallbackType;
+    throw new RnpmLimitExceededError(msg, total, limit, splitType);
+  }
+
+  throw new ApiError(msg, status, err?.code, envelope?.requestId, err?.details);
+}
+
+// Consuma fluxul si intoarce rezultatul O SINGURA DATA, la final. Evenimentele
+// `ping` sunt doar semn de viata pentru intermediari — nu se afiseaza nimic
+// progresiv, interfata ramane identica.
+async function consumeSearchStream(res: Response, type: RnpmSearchType): Promise<RnpmSearchResponse> {
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("Raspuns incomplet — fluxul nu a putut fi citit");
+  const decoder = new TextDecoder();
+  let buf = "";
+  let result: RnpmSearchResponse | null = null;
+
+  try {
+    while (result === null) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+
+      while (true) {
+        const idx = buf.indexOf("\n\n");
+        if (idx < 0) break;
+        const chunk = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        // Parsare pe linii explicit, NU cu regex: in JavaScript `$` cu flag
+        // multiline trateaza U+2028/U+2029 drept sfarsit de linie, iar acele
+        // caractere sunt valide in siruri JSON si `JSON.stringify` nu le
+        // escapeaza. Un aviz care le contine ar fi trunchiat si ar produce
+        // eroare de parsare — pe calea JSON veche functiona.
+        let event = "";
+        let raw: string | null = null;
+        for (const line of chunk.split("\n")) {
+          const clean = line.endsWith("\r") ? line.slice(0, -1) : line;
+          if (clean.startsWith("event:")) event = clean.slice(6).trim();
+          else if (clean.startsWith("data:")) raw = clean.slice(5).replace(/^ /, "");
+        }
+        if (!event || raw === null) continue;
+        if (event === "ping") continue;
+        let data: unknown;
+        try {
+          data = JSON.parse(raw);
+        } catch {
+          // Un cadru trunchiat sau injectat de un intermediar ar propaga un
+          // SyntaxError in engleza pana la utilizator. Mesajele din interfata
+          // sunt in romana — vezi si garda echivalenta din rnpmSplitSearch.
+          throw new Error("Raspuns invalid de la server (cadru corupt in flux)");
+        }
+        if (event === "result") {
+          result = data as RnpmSearchResponse;
+          break;
+        }
+        if (event === "error") throwSearchStreamError(data, type);
+      }
+    }
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      /* deja inchis */
+    }
+  }
+
+  // Flux terminat fara eveniment terminal (proces oprit, conexiune taiata):
+  // aruncam explicit, ca sa nu intoarcem `undefined` in sus.
+  if (result === null) throw new Error("Raspuns incomplet — niciun rezultat final primit");
+  return result;
+}
+
 export async function rnpmSearch(
   type: RnpmSearchType,
   params: RnpmSearchParams,
@@ -173,10 +264,18 @@ export async function rnpmSearch(
 ): Promise<RnpmSearchResponse> {
   const res = await apiFetch(`${BASE}/search`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    // Cerem transportul in flux: altfel cererea tace pana termina tot, iar
+    // intermediarii (oauth2-proxy, Cloudflare) o taie si utilizatorul vede 502.
+    // Serverele mai vechi ignora header-ul si raspund JSON — calea de mai jos
+    // ramane valabila.
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
     body: JSON.stringify({ type, params, captchaKey, ...opts }),
     signal,
   });
+
+  if ((res.headers.get("content-type") ?? "").toLowerCase().includes("text/event-stream")) {
+    return consumeSearchStream(res, type);
+  }
   // Special-case 400 + code:"LIMIT_EXCEEDED" — escape din jsonOrThrow inainte de a colapsa eroarea.
   // v2.14.0 envelope: { data: null, error: { code, message, details: { total, limit, splittable } }, requestId }.
   // Fara unwrap, `new Error(obj.error)` produce message="[object Object]".

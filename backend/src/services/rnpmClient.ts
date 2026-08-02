@@ -249,9 +249,37 @@ export interface RnpmClientOptions {
 // expirarea TTL-ului de idempotency retry-ul clientului pornea o cautare
 // duplicata CONCURENTA. Timeout per-fetch, env-tunable.
 // Lazy read (nu constanta module-top) ca testele sa poata seta env-ul dupa import.
+//
+// ATENTIE la operare: valoarea se inmulteste pe caile de detaliu. `fetchIstoric`
+// poate consuma 2×T (buget propriu per incercare), iar o pagina de 25 la
+// concurrency 12 inseamna 3 transe — deci ~6×T doar pe trecerea normala, sub
+// plafonul de 900s al transportului in flux (`SEARCH_STREAM_TIMEOUT_MS`). Peste
+// ~70s cautarea moare cu 504 dupa ce avizele s-au persistat deja: userul vede
+// eroare, iar datele exista doar in /saved. Trecerea de recuperare are plafon
+// separat (`RNPM_RECOVERY_BUDGET_MS`), deci nu intra in acest calcul.
 function rnpmTimeoutMs(): number {
   const raw = Number.parseInt(process.env.RNPM_TIMEOUT_MS ?? "", 10);
   return Number.isFinite(raw) && raw > 0 ? raw : 60_000;
+}
+
+// `AbortSignal.timeout` respinge cu DOMException name="TimeoutError"; abortul de
+// client vine ca name="AbortError". Distinctia conteaza: pe timeout reincercam,
+// pe abort NU — clientul a plecat si orice cerere noua e munca irosita.
+function isTimeoutError(e: unknown): boolean {
+  return e instanceof DOMException && e.name === "TimeoutError";
+}
+
+// Toate expirarile produc acelasi text generic, deci logul nu spunea NICIODATA
+// care sub-cerere a cazut — investigatia incidentului din 2026-08-01 a durat o zi
+// din cauza asta. Impachetam DOAR `TimeoutError`; `AbortError` trebuie sa treaca
+// neatins, altfel abortul de client devine esec obisnuit si bucla de detalii
+// continua sa lucreze pentru cineva care a plecat.
+// `external` = semnalul apelantului. Daca el a expirat, termenul e AL LUI: il
+// lasam sa iasa ca atare, altfel un termen extern s-ar prezenta ca un simplu
+// esec de detaliu si bucla de deasupra ar continua ca si cum ar mai fi timp.
+function labelTimeout(e: unknown, what: string, external?: AbortSignal): unknown {
+  if (!isTimeoutError(e) || external?.aborted) return e;
+  return new RnpmError(`Expirare RNPM (${what}) dupa ${rnpmTimeoutMs()}ms`, 504, e, "upstream_timeout");
 }
 
 function withRnpmTimeout(signal?: AbortSignal): AbortSignal {
@@ -324,16 +352,23 @@ export class RnpmClient {
   async fetchPart(uuid: string, part: 1 | 2 | 3 | 4, signal?: AbortSignal): Promise<unknown> {
     const url = `${RNPM_BASE_URL}/api/view/inscriere/${uuid}?part=${part}`;
     const composed = withRnpmTimeout(signal);
-    const res = await this.fetchImpl(url, { headers: defaultHeaders(), signal: composed });
-    if (res.status === 400 || res.status === 404 || res.status === 410) {
-      await res.body?.cancel().catch(() => {});
-      return null;
+    // Bugetul acopera cererea INTREAGA, deci si citirea body-ului: eticheta
+    // trebuie sa acopere acelasi interval, altfel o expirare aparuta dupa ce
+    // au sosit headerele iese generica si logul nu spune care parte a cazut.
+    try {
+      const res = await this.fetchImpl(url, { headers: defaultHeaders(), signal: composed });
+      if (res.status === 400 || res.status === 404 || res.status === 410) {
+        await res.body?.cancel().catch(() => {});
+        return null;
+      }
+      if (!res.ok) {
+        const body = await readResponseTextWithCap(res, RNPM_MAX_RESPONSE_BYTES, composed).catch(() => "");
+        throw new RnpmError(`Eroare RNPM detail part ${part} (${res.status}): ${body.slice(0, 200)}`, res.status);
+      }
+      return await readRnpmJson(res, composed);
+    } catch (e) {
+      throw labelTimeout(e, `part=${part}`, signal);
     }
-    if (!res.ok) {
-      const body = await readResponseTextWithCap(res, RNPM_MAX_RESPONSE_BYTES, composed).catch(() => "");
-      throw new RnpmError(`Eroare RNPM detail part ${part} (${res.status}): ${body.slice(0, 200)}`, res.status);
-    }
-    return await readRnpmJson(res, composed);
   }
 
   async fetchIstoric(uuid: string, signal?: AbortSignal): Promise<RnpmIstoricEntry[]> {
@@ -342,25 +377,59 @@ export class RnpmClient {
     // execution error" then 200 with data a few seconds later. Retry once with a
     // short backoff before giving up. Un singur buget de timeout acopera ambele
     // attempts (v2.37.1).
-    const composed = withRnpmTimeout(signal);
-    const doFetch = () => this.fetchImpl(url, { headers: defaultHeaders(), signal: composed });
-    let res = await doFetch();
-    if (res.status === 400) {
-      await res.body?.cancel().catch(() => {});
+    // Fiecare incercare primeste BUGET PROPRIU. Inainte, un singur `composed`
+    // acoperea ambele: daca prima consuma aproape tot, a doua pornea cu semnalul
+    // expirat si nu avea nicio sansa. Semnalul extern intra in ambele bugete prin
+    // `AbortSignal.any`, deci anularea clientului le intrerupe pe amandoua.
+    // O incercare COMPLETA: fetch plus citirea body-ului. Bugetul le acopera pe
+    // amandoua, deci si reincercarea trebuie sa le acopere pe amandoua — altfel
+    // un raspuns ale carui headere sosesc la timp, dar al carui body se scurge
+    // lent, arde bugetul fara a doua sansa.
+    const attempt = async (): Promise<{ status: number; data?: unknown }> => {
+      const composed = withRnpmTimeout(signal);
+      const res = await this.fetchImpl(url, { headers: defaultHeaders(), signal: composed });
+      // 404/410 = aviz not found / gone; 400 = flaky, tratat de apelant.
+      if (res.status === 400 || res.status === 404 || res.status === 410) {
+        await res.body?.cancel().catch(() => {});
+        return { status: res.status };
+      }
+      if (!res.ok) {
+        const body = await readResponseTextWithCap(res, RNPM_MAX_RESPONSE_BYTES, composed).catch(() => "");
+        throw new RnpmError(`Eroare RNPM istoric (${res.status}): ${body.slice(0, 200)}`, res.status);
+      }
+      return { status: res.status, data: await readRnpmJson(res, composed) };
+    };
+
+    // Reincercarea acoperea DOAR status 400. O prima incercare agatata pana la
+    // expirare arunca direct, fara a doua sansa — exact profilul incidentului
+    // din 2026-08-01, unde 12 avize s-au pierdut integral pentru ca istoricul,
+    // date optionale, a luat cu el si partile 1-4 prin `Promise.all`.
+    let out: { status: number; data?: unknown };
+    let retried = false;
+    try {
+      out = await attempt();
+    } catch (e) {
+      if (!isTimeoutError(e) || signal?.aborted) throw e;
+      retried = true;
+      try {
+        out = await attempt();
+      } catch (e2) {
+        throw labelTimeout(e2, "istoric", signal);
+      }
+    }
+
+    if (!retried && out.status === 400) {
       await new Promise((r) => setTimeout(r, 1500));
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      res = await doFetch();
+      try {
+        out = await attempt();
+      } catch (e) {
+        throw labelTimeout(e, "istoric", signal);
+      }
     }
-    // 404/410 = aviz not found / gone; 400 after retry = treat as no history.
-    if (res.status === 400 || res.status === 404 || res.status === 410) {
-      await res.body?.cancel().catch(() => {});
-      return [];
-    }
-    if (!res.ok) {
-      const body = await readResponseTextWithCap(res, RNPM_MAX_RESPONSE_BYTES, composed).catch(() => "");
-      throw new RnpmError(`Eroare RNPM istoric (${res.status}): ${body.slice(0, 200)}`, res.status);
-    }
-    const data = await readRnpmJson(res, composed);
+    // 400 dupa reincercare = tratat ca istoric inexistent.
+    if (out.status === 400 || out.status === 404 || out.status === 410) return [];
+    const data = out.data;
     // Real response shape is { inscriere: string, istoric: Entry[] }.
     // Keep array + { entries } paths as tolerant fallbacks.
     if (data && Array.isArray((data as { istoric?: unknown }).istoric)) {
