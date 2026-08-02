@@ -179,8 +179,65 @@ provizionarea utilizatorilor, backup-ul bazei si actualizarea imaginilor. Vezi
 
 ## 7. Intretinere
 
-- **Update**: copiaza sursele noi peste folder, apoi **Build** in Container
-  Manager. `data/` ramane neatins.
+### Update la o versiune noua
+
+Procedura verificata pe deploy-ul real (v2.44.0, 2026-08-02). Folderul aplicatiei
+e `/volume3/docker/legal-dashboard`.
+
+1. **Tag inainte de merge.** Pune un tag pe starea care ruleaza ACUM
+   (`git tag -a vX.Y.Z <commit-live> && git push origin vX.Y.Z`), altfel nu ai
+   un punct fix la care sa te intorci: rollback-ul inseamna build din acel tag.
+2. **Copiaza exact arborele tagat**, nu working tree-ul:
+
+   ```bash
+   git archive vX.Y.Z | ssh nas 'tar -x --exclude=docker-compose.yml \
+     -C /volume3/docker/legal-dashboard'
+   ```
+
+   `--exclude=docker-compose.yml` NU e optional: repo-ul are un
+   `docker-compose.yml` la radacina (alt stack), iar pe NAS acel nume e ocupat
+   de copia lui `deploy/docker-compose.nas.yml`. Fara exclude il suprascrii si
+   strici deploy-ul. `.env` si `data/` nu sunt in arhiva, deci raman neatinse.
+3. **Ridica `APP_VERSION` in `.env`.** Compose construieste
+   `legal-dashboard:${APP_VERSION}`; daca ramane pe versiunea veche, imaginea
+   noua suprascrie tag-ul vechi si numele imaginii de rollback ajunge sa indice
+   cod nou.
+4. **Stop, apoi Build** in Container Manager (Build, nu Start — altfel porneste
+   imaginea veche), si abia apoi porneste stack-ul. Stop-ul inchide SQLite curat.
+5. **Verifica versiunea** in sidebar dupa `Ctrl+Shift+R`. Bundle-ul frontend e
+   cache-uit in browser, deci fara hard refresh vezi versiunea veche chiar si
+   dupa un build corect.
+
+Rollback: build din tag-ul precedent, dupa aceeasi procedura. Verifica intai
+daca releaseul aduce migratii — daca nu, baza e compatibila in ambele sensuri si
+rollback-ul nu cere restore.
+
+### Diagnostic fara sudo
+
+`docker` de pe NAS cere parola de sudo, deci `docker logs` / `docker ps` nu sunt
+disponibile dintr-o sesiune SSH neprivilegiata. Ce ramane observabil:
+
+- boot-ul aplicatiei — scrieri proaspete in `data/legal-dashboard.db-wal`;
+- lantul de auth — `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:4180/`
+  trebuie sa dea `302`;
+- rezultatul unei cautari RNPM — `sqlite3` exista pe NAS, iar bazele per user
+  din `data/rnpm/*.db` permit comparatia dintre ce a anuntat RNPM si ce s-a
+  salvat efectiv:
+
+  ```bash
+  sqlite3 -separator '|' "file:$DB?mode=ro" \
+    "select s.id, s.total_results,
+            (select count(*) from rnpm_avize a where a.search_id = s.id)
+     from rnpm_searches s order by s.id desc limit 5;"
+  ```
+
+  Randul de cautare se scrie la START, deci un `0` imediat dupa lansare
+  inseamna "in curs", nu esec. Asteapta stabilizarea numarului.
+
+### Restul
+
+- **Update (varianta manuala)**: copiaza sursele noi peste folder, apoi
+  **Build** in Container Manager. `data/` ramane neatins.
 - **Backup**: include `docker/legal-dashboard/data` in Hyper Backup — acolo e
   baza SQLite cu dosarele monitorizate.
 - **Rotire secrete**: schimbi valoarea in `.env` si dai Build. Rotirea
