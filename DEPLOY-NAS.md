@@ -182,62 +182,100 @@ provizionarea utilizatorilor, backup-ul bazei si actualizarea imaginilor. Vezi
 ### Update la o versiune noua
 
 Procedura verificata pe deploy-ul real (v2.44.0, 2026-08-02). Folderul aplicatiei
-e `/volume3/docker/legal-dashboard`.
+e `/volume3/docker/legal-dashboard`. In pasii de mai jos `$VECHE` = versiunea
+care ruleaza ACUM, `$NOUA` = versiunea pe care o instalezi.
 
-1. **Tag inainte de merge.** Pune un tag pe starea care ruleaza ACUM
-   (`git tag -a vX.Y.Z <commit-live> && git push origin vX.Y.Z`), altfel nu ai
-   un punct fix la care sa te intorci: rollback-ul inseamna build din acel tag.
-2. **Copiaza exact arborele tagat**, nu working tree-ul:
+1. **Tag pe starea live, inainte de merge.** Fara el nu ai un punct fix la care
+   sa te intorci, pentru ca rollback-ul inseamna build din acel tag:
 
    ```bash
-   git archive vX.Y.Z | ssh nas 'tar -x --exclude=docker-compose.yml \
-     -C /volume3/docker/legal-dashboard'
+   git tag -a "$VECHE" <commit-care-ruleaza-acum> && git push origin "$VECHE"
    ```
 
-   `--exclude=docker-compose.yml` NU e optional: repo-ul are un
-   `docker-compose.yml` la radacina (alt stack), iar pe NAS acel nume e ocupat
-   de copia lui `deploy/docker-compose.nas.yml`. Fara exclude il suprascrii si
-   strici deploy-ul. `.env` si `data/` nu sunt in arhiva, deci raman neatinse.
-3. **Ridica `APP_VERSION` in `.env`.** Compose construieste
+2. **Backup inainte de orice atingere a deploy-ului.** Din Setari > Backup
+   (admin) sau prin copierea lui `data/` cu aplicatia OPRITA. Nu te baza pe
+   "releaseul nu are migratii" ca motiv sa sari peste: absenta unei migratii de
+   schema nu garanteaza ca versiunea noua nu scrie date pe care cea veche le
+   citeste altfel. Backup-ul e conditia care face rollback-ul sigur, nu migratia.
+
+3. **Pregateste arborele nou LANGA cel viu, apoi schimba-le.** Extragerea direct
+   peste folderul live lasa un arbore pe jumatate actualizat daca transferul
+   pica la mijloc:
+
+   ```bash
+   NAS=/volume3/docker/legal-dashboard
+   git archive "$NOUA" | ssh nas "mkdir -p $NAS.new && tar -x -C $NAS.new"
+   # pastreaza starea locala care NU vine din git
+   ssh nas "cp -a $NAS/.env $NAS.new/ && cp -a $NAS/docker-compose.yml $NAS.new/             && mv $NAS/data $NAS.new/data             && mv $NAS $NAS.old-$VECHE && mv $NAS.new $NAS"
+   ```
+
+   `docker-compose.yml` se copiaza din vechi, NU din arhiva: repo-ul are un
+   `docker-compose.yml` la radacina (alt stack), iar pe NAS acel nume e ocupat de
+   copia lui `deploy/docker-compose.nas.yml`. Daca il iei din arhiva, strici
+   deploy-ul. Daca `deploy/docker-compose.nas.yml` s-a schimbat in releaseul nou,
+   copiaza-l explicit si compara cu cel vechi inainte de Build.
+
+   `$NAS.old-$VECHE` ramane pe disc ca plasa; sterge-l dupa ce noua versiune e
+   confirmata.
+
+4. **Ridica `APP_VERSION` in `.env`.** Compose construieste
    `legal-dashboard:${APP_VERSION}`; daca ramane pe versiunea veche, imaginea
    noua suprascrie tag-ul vechi si numele imaginii de rollback ajunge sa indice
    cod nou.
-4. **Stop, apoi Build** in Container Manager (Build, nu Start — altfel porneste
-   imaginea veche), si abia apoi porneste stack-ul. Stop-ul inchide SQLite curat.
-5. **Verifica versiunea** in sidebar dupa `Ctrl+Shift+R`. Bundle-ul frontend e
-   cache-uit in browser, deci fara hard refresh vezi versiunea veche chiar si
-   dupa un build corect.
 
-Rollback: build din tag-ul precedent, dupa aceeasi procedura. Verifica intai
-daca releaseul aduce migratii — daca nu, baza e compatibila in ambele sensuri si
-rollback-ul nu cere restore.
+5. **Stop, apoi Build** in Container Manager (Build, nu Start — altfel porneste
+   imaginea veche), si abia apoi porneste stack-ul. Stop-ul inchide SQLite curat.
+
+6. **Verifica ce ruleaza efectiv** (vezi mai jos: `system.boot` din `audit_log`),
+   apoi versiunea din sidebar dupa `Ctrl+Shift+R`. Bundle-ul frontend e cache-uit
+   in browser, deci fara hard refresh vezi versiunea veche chiar si dupa un build
+   corect.
+
+Rollback: aceeasi procedura, cu `$NOUA` = tag-ul precedent (sau porneste
+`$NAS.old-$VECHE`, daca inca exista). Daca versiunea noua a scris date, restaureaza
+si backup-ul de la pasul 2.
 
 ### Diagnostic fara sudo
 
 `docker` de pe NAS cere parola de sudo, deci `docker logs` / `docker ps` nu sunt
 disponibile dintr-o sesiune SSH neprivilegiata. Ce ramane observabil:
 
-- boot-ul aplicatiei — scrieri proaspete in `data/legal-dashboard.db-wal`;
-- lantul de auth — `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:4180/`
-  trebuie sa dea `302`;
-- rezultatul unei cautari RNPM — `sqlite3` exista pe NAS, iar bazele per user
+- **Ce versiune ruleaza si cand a pornit** — sursa de adevar, nu inferenta:
+
+  ```bash
+  MONO=/volume3/docker/legal-dashboard/data/legal-dashboard.db
+  sqlite3 -separator ' | ' "file:$MONO?mode=ro"     "select ts, action, json_extract(detail_json,'$.version')
+       from audit_log
+      where action in ('system.boot','system.shutdown')
+      order by id desc limit 5;"
+  ```
+
+  Nu folosi activitatea din `*.db-wal` ca semnal de boot: WAL-ul e atins si de
+  checkpoint-uri sau de scrieri obisnuite, deci nu distinge o repornire de
+  trafic normal.
+
+- **Lantul de auth** — `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:4180/`
+  trebuie sa dea `302`. Atentie: `302` vine de la oauth2-proxy si spune DOAR ca
+  proxy-ul e sus; containerul aplicatiei poate fi cazut in spatele lui. Pentru
+  sanatatea aplicatiei foloseste `system.boot` de mai sus sau `/health`
+  autentificat din browser.
+
+- **Rezultatul unei cautari RNPM** — `sqlite3` exista pe NAS, iar bazele per user
   din `data/rnpm/*.db` permit comparatia dintre ce a anuntat RNPM si ce s-a
   salvat efectiv:
 
   ```bash
-  sqlite3 -separator '|' "file:$DB?mode=ro" \
-    "select s.id, s.total_results,
+  DB=/volume3/docker/legal-dashboard/data/rnpm/<uuid>-<stem>.db
+  sqlite3 -separator ' | ' "file:$DB?mode=ro"     "select s.id, s.total_results,
             (select count(*) from rnpm_avize a where a.search_id = s.id)
      from rnpm_searches s order by s.id desc limit 5;"
   ```
 
-  Randul de cautare se scrie la START, deci un `0` imediat dupa lansare
-  inseamna "in curs", nu esec. Asteapta stabilizarea numarului.
+  Randul de cautare se scrie la START, deci un `0` imediat dupa lansare inseamna
+  "in curs", nu esec. Asteapta stabilizarea numarului.
 
 ### Restul
 
-- **Update (varianta manuala)**: copiaza sursele noi peste folder, apoi
-  **Build** in Container Manager. `data/` ramane neatins.
 - **Backup**: include `docker/legal-dashboard/data` in Hyper Backup — acolo e
   baza SQLite cu dosarele monitorizate.
 - **Rotire secrete**: schimbi valoarea in `.env` si dai Build. Rotirea
