@@ -1,5 +1,10 @@
 import type { Context, Next } from "hono";
-import { AuthenticationError, getAuthProvider, type AuthenticatedContext } from "../auth/authProvider.ts";
+import {
+  AUTH_COOKIE_NAME,
+  AuthenticationError,
+  getAuthProvider,
+  type AuthenticatedContext,
+} from "../auth/authProvider.ts";
 import { recordAudit } from "../db/auditRepository.ts";
 import { getAuthMode } from "../auth/config.ts";
 import { fail } from "../util/envelope.ts";
@@ -12,6 +17,26 @@ import { TOKEN_PREFIX } from "../db/apiTokenRepository.ts";
 function isPatShapedBearer(c: Context): boolean {
   const m = /^Bearer\s+(.+)$/i.exec((c.req.header("authorization") ?? "").trim());
   return (m?.[1] ?? "").startsWith(TOKEN_PREFIX);
+}
+
+// A prezentat clientul VREUN credential al aplicatiei, oricare?
+//
+// Fara campul asta, "cerere fara credential" si "credential invalid" produc
+// amandoua `code: "unauthorized"` in audit, deci arata identic — o incercare
+// sistematica de acces neautorizat (mereu fara credential) nu se poate separa
+// de reincarcarile esuate ale unui utilizator legitim.
+//
+// Deliberat NU refoloseste `readRequestToken` din authProvider: aceasta ruleaza
+// pe calea de EROARE si nu are voie sa arunce. Selectia de credentiale din
+// authProvider e pe cale sa devina fail-closed (poate arunca pe conflict intre
+// surse), iar un throw de acolo ar inghiti randul de audit. Helperul de aici e
+// pur: doar prezenta, niciodata valoarea, si nicio validare.
+//
+// Ortogonal fata de `isPatShaped`: acela raspunde "ce FEL de credential",
+// acesta raspunde "a fost vreunul".
+function hasPresentedAppCredential(c: Context): boolean {
+  if ((c.req.header("authorization") ?? "").trim() !== "") return true;
+  return (c.req.header("cookie") ?? "").includes(`${AUTH_COOKIE_NAME}=`);
 }
 
 // Type-augment Hono so c.get("ownerId") is typed string instead of unknown.
@@ -77,6 +102,11 @@ function writeAuthError(c: Context, err: AuthenticationError): Response {
         // audit (fix): separa replay-urile de PAT revocat/expirat de esecurile JWT in log,
         // fara lookup DB pe calea de esec (anti-enumerare/timing). true = Bearer ld_pat_*.
         isPatShaped: isPatShapedBearer(c),
+        // v2.43.4+: "a venit fara nimic" vs "a venit cu ceva invalid". Doar prezenta,
+        // niciodata valoarea. Exista DOAR pe refuzurile de autentificare (aici), NU si
+        // pe cele de autorizare din requireRole — acolo utilizatorul e deja autentificat
+        // si campul ar minti. O interogare de audit filtrata pe el nu e exhaustiva.
+        tokenPresent: hasPresentedAppCredential(c),
       },
     });
   } catch (auditErr) {
