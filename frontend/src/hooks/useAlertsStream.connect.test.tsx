@@ -1,33 +1,43 @@
 // @vitest-environment jsdom
 
-// Prima conectare a stream-ului de alerte, in modul web.
+// Conectarea stream-ului de alerte in modul web.
 //
-// Bug observat in productie (audit: `auth.denied` pe /api/v1/alerts/stream, cod
-// `unauthorized`, actor `system`): la incarcarea paginii hook-ul deschidea
-// EventSource-ul imediat, fara sa se asigure ca sesiunea exista. EventSource NU
-// trece prin apiFetch, deci nu prinde interceptorul de 401 care repara tacut
-// celelalte cereri — refuzul ramane scris, si singura recuperare era prin
-// ciclul de reconectare, adica dupa cel putin o secunda si dupa un `auth.denied`
-// deja consumat.
+// Bug 1 (rezolvat anterior): prima conectare deschidea EventSource fara sa se
+// asigure ca sesiunea exista, desi RECONECTAREA o facea. EventSource nu trece
+// prin apiFetch, deci nu prinde interceptorul de 401 care repara tacit celelalte
+// cereri — refuzul ramanea scris in audit.
 //
-// Calea de RECONECTARE avea deja gardul (`ensureWebSession()` inainte de
-// `connect()`), pus exact ca sa opreasca rafalele de `auth.denied` dupa o
-// trezire cu cookie expirat. Testele fixeaza aceeasi garantie pe prima
-// conectare, si pastreaza desktopul cu zero apeluri de sesiune.
+// Bug 2 (acest fisier il acopera): euristica de prospetime a sesiunii e o
+// variabila per-tab, nu adevarul cookie-jar-ului. Un cookie sters de un logout
+// in alt tab, sau invalidat de o rotatie de secret la redeploy, o lasa pe
+// "proaspat". `ensureWebSession()` NEfortat devine atunci un no-op, stream-ul se
+// conecteaza fara sesiune valida, ia 401, se reconecteaza, si tot asa — pana la
+// ~45 min de refuzuri la interval de 30s, timp in care utilizatorul NU primeste
+// alerte desi fereastra pare conectata.
+//
+// Regula introdusa: o conexiune care moare INAINTE de `open` inseamna ca
+// sesiunea a fost refuzata -> urmatoarea incercare FORTEAZA re-mintul. O
+// conexiune care a ajuns la `open` si apoi moare e o pana de retea -> NU se
+// forteaza, altfel orice hopa de retea ar produce o rafala de sync-uri.
 
 import { createRoot, type Root } from "react-dom/client";
 import { act } from "react-dom/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { SyncSessionResult } from "@/lib/api";
 
-// Ordinea reala a efectelor: fiecare apel isi lasa urma aici, deci testul poate
-// afirma ca sesiunea a fost ceruta INAINTE de deschiderea stream-ului, nu doar
-// ca ambele s-au intamplat la un moment dat.
+// Contractul real e un STRING literal, nu un obiect (`api.ts`:
+// `export type SyncSessionResult = "ok" | "not_provisioned" | "unavailable" | "error"`).
+// Mock-ul e tipat explicit ca sa nu se poata intoarce o forma inexistenta: o
+// versiune anterioara a acestui fisier returna `{ ok: true }`, ceea ce ar fi
+// trecut verde si ar fi masurat un contract care nu exista.
+type EnsureWebSession = (options?: { force?: boolean }) => Promise<SyncSessionResult>;
+
 const calls: string[] = [];
-const ensureWebSession = vi.fn();
+const ensureWebSession = vi.fn<EnsureWebSession>();
 let webRuntime = true;
 
 vi.mock("@/lib/api", () => ({
-  ensureWebSession: (...args: unknown[]) => ensureWebSession(...args),
+  ensureWebSession: (...args: Parameters<EnsureWebSession>) => ensureWebSession(...args),
   isWebRuntime: () => webRuntime,
 }));
 
@@ -43,6 +53,7 @@ class FakeEventSource {
   static instances: FakeEventSource[] = [];
   readonly url: string;
   onerror: (() => void) | null = null;
+  private readonly listeners = new Map<string, () => void>();
 
   constructor(url: string) {
     this.url = url;
@@ -50,12 +61,33 @@ class FakeEventSource {
     FakeEventSource.instances.push(this);
   }
 
-  addEventListener(): void {}
+  addEventListener(type: string, handler: () => void): void {
+    this.listeners.set(type, handler);
+  }
+
   close(): void {}
+
+  /** Conexiunea a fost acceptata de server. */
+  emitOpen(): void {
+    this.listeners.get("open")?.();
+  }
+
+  /** Conexiunea a murit (401 la handshake, sau pana de retea dupa open). */
+  emitError(): void {
+    this.onerror?.();
+  }
 }
 
 let container: HTMLDivElement;
 let root: Root;
+
+function resultOf(sequence: SyncSessionResult[]): void {
+  let i = 0;
+  ensureWebSession.mockImplementation(async (options) => {
+    calls.push(options?.force === true ? "ensureWebSession:force" : "ensureWebSession");
+    return sequence[Math.min(i++, sequence.length - 1)] ?? "ok";
+  });
+}
 
 async function renderHook() {
   const { useAlertsStream } = await import("@/hooks/useAlertsStream");
@@ -73,10 +105,7 @@ beforeEach(() => {
   FakeEventSource.instances.length = 0;
   webRuntime = true;
   ensureWebSession.mockReset();
-  ensureWebSession.mockImplementation(async () => {
-    calls.push("ensureWebSession");
-    return { ok: true };
-  });
+  resultOf(["ok"]);
   vi.stubGlobal("EventSource", FakeEventSource);
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -89,6 +118,7 @@ afterEach(async () => {
   });
   container.remove();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("useAlertsStream — prima conectare", () => {
@@ -99,11 +129,76 @@ describe("useAlertsStream — prima conectare", () => {
     expect(calls).toEqual(["ensureWebSession", "eventsource:/api/v1/alerts/stream"]);
   });
 
+  it("prima conectare NU forteaza re-mintul (nu exista inca un esec de handshake)", async () => {
+    await renderHook();
+
+    // Asertiunea e pe COMPORTAMENT (fortat vs nefortat), nu pe forma exacta a
+    // argumentelor: `ensureWebSession()` si `ensureWebSession(undefined)` sunt
+    // echivalente functional, iar un test care le distinge ar pica la o
+    // refactorizare inofensiva.
+    expect(calls.filter((c) => c.startsWith("ensureWebSession"))).toEqual(["ensureWebSession"]);
+  });
+
   it("in desktop, conecteaza direct si NU cere sesiune web", async () => {
     webRuntime = false;
     await renderHook();
 
     expect(ensureWebSession).not.toHaveBeenCalled();
     expect(calls).toEqual(["eventsource:/api/v1/alerts/stream"]);
+  });
+});
+
+describe("useAlertsStream — recuperare din sesiune invalida", () => {
+  it("nu deschide stream-ul cand re-mintul esueaza, dar REPROGRAMEAZA reconectarea", async () => {
+    // Contraexemplul care trebuie sa pice: o implementare care deschide oricum
+    // (comportamentul vechi al lui `.finally`), SI una care se opreste definitiv.
+    vi.useFakeTimers();
+    resultOf(["error", "error", "ok"]);
+    await renderHook();
+
+    expect(FakeEventSource.instances.length).toBe(0);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(FakeEventSource.instances.length).toBe(0);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(FakeEventSource.instances.length).toBe(1);
+    expect(ensureWebSession).toHaveBeenCalledTimes(3);
+  });
+
+  it("o conexiune moarta INAINTE de open forteaza re-mintul la reconectare", async () => {
+    vi.useFakeTimers();
+    resultOf(["ok"]);
+    await renderHook();
+
+    await act(async () => {
+      FakeEventSource.instances[0].emitError();
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+
+    // Al doilea apel trebuie sa fie fortat: handshake-ul refuzat inseamna ca
+    // euristica de prospetime minte, iar un apel nefortat ar fi un no-op.
+    expect(calls.filter((c) => c.startsWith("ensureWebSession"))).toEqual([
+      "ensureWebSession",
+      "ensureWebSession:force",
+    ]);
+  });
+
+  it("o conexiune moarta DUPA open NU forteaza (pana de retea, nu sesiune invalida)", async () => {
+    vi.useFakeTimers();
+    resultOf(["ok"]);
+    await renderHook();
+
+    await act(async () => {
+      FakeEventSource.instances[0].emitOpen();
+      FakeEventSource.instances[0].emitError();
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+
+    expect(calls.filter((c) => c.startsWith("ensureWebSession"))).toEqual(["ensureWebSession", "ensureWebSession"]);
   });
 });

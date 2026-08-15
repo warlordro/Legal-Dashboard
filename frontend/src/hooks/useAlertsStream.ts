@@ -121,37 +121,63 @@ export function useAlertsStream(): UseAlertsStreamResult {
       }
     };
 
+    // A ajuns conexiunea curenta la `open`? Distinge cele doua feluri de moarte:
+    // refuz de sesiune la handshake (nu s-a deschis niciodata) vs pana de retea
+    // pe o conexiune care functiona. Doar prima justifica fortarea re-mintului.
+    let openedSinceConnect = false;
+
     // EventSource nu trece prin apiFetch, deci nu are interceptorul de 401:
-    // conectarea cu un cookie lipsa sau expirat lasa un `auth.denied` in audit
-    // si se repara abia la urmatorul ciclu de reconectare. ensureWebSession e
-    // ieftin cat timp cookie-ul e proaspat (nu emite request), deci il putem
-    // aseza pe FIECARE conectare — inclusiv pe prima, care la incarcarea paginii
-    // pleaca inaintea sesiunii. In desktop nu exista bridge -> conectam direct.
-    const connectWithSession = () => {
+    // conectarea cu un cookie lipsa sau expirat lasa un `auth.denied` in audit si
+    // nu se repara singura. ensureWebSession e ieftin cat timp cookie-ul pare
+    // proaspat (nu emite request), deci il punem pe FIECARE conectare, inclusiv
+    // pe prima. In desktop nu exista bridge -> conectam direct.
+    //
+    // `force` inchide gaura in care euristica de prospetime MINTE: ea e o
+    // variabila per-tab, nu adevarul cookie-jar-ului, deci un cookie sters de un
+    // logout in alt tab (sau invalidat de o rotatie de secret) o lasa pe
+    // "proaspat". Fara fortare, apelul devine no-op si stream-ul reintra la
+    // nesfarsit in acelasi refuz.
+    //
+    // Conectam DOAR pe rezultat "ok": inainte, `.finally()` deschidea stream-ul
+    // si dupa un re-mint esuat, ceea ce garanta inca un 401. Pe orice alt
+    // rezultat reprogramam — backoff-ul existent tine ritmul, iar ciclul nu se
+    // poate opri definitiv.
+    const connectWithSession = (force: boolean) => {
       if (stopped) return;
       if (!isWebRuntime()) {
         connect();
         return;
       }
-      void ensureWebSession().finally(() => {
-        if (!stopped) connect();
-      });
+      void ensureWebSession(force ? { force: true } : undefined)
+        .then((result) => {
+          if (stopped) return;
+          if (result === "ok") connect();
+          else scheduleReconnect();
+        })
+        .catch(() => {
+          // ensureWebSession nu arunca azi, dar un listener din `emitSessionReminted`
+          // poate respinge promisiunea. Fara acest catch, stream-ul ar ramane mort.
+          if (!stopped) scheduleReconnect();
+        });
     };
 
     const scheduleReconnect = () => {
       if (stopped || reconnectTimerRef.current !== null) return;
+      const force = !openedSinceConnect;
       reconnectTimerRef.current = window.setTimeout(() => {
         reconnectTimerRef.current = null;
-        connectWithSession();
+        connectWithSession(force);
       }, retryMs);
       retryMs = Math.min(retryMs * 2, 30000);
     };
 
     const connect = () => {
       cleanupSource();
+      openedSinceConnect = false;
       const es = new EventSource("/api/v1/alerts/stream");
       eventSourceRef.current = es;
       es.addEventListener("open", () => {
+        openedSinceConnect = true;
         retryMs = 1000;
         // Refresh server-truth counter and bump streamVersion so the Alerts
         // page re-fetches its visible list — covers any alerts dropped while
@@ -189,7 +215,9 @@ export function useAlertsStream(): UseAlertsStreamResult {
       };
     };
 
-    connectWithSession();
+    // Prima conectare nu forteaza: nu exista inca un handshake refuzat care sa
+    // dovedeasca faptul ca euristica de prospetime minte.
+    connectWithSession(false);
     return () => {
       stopped = true;
       cleanupSource();
