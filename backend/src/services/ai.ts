@@ -30,14 +30,14 @@ export const AI_MODELS: Record<string, { provider: AiUsageProvider; modelId: str
   "gpt-5.6-luna": { provider: "openai", modelId: "gpt-5.6-luna" },
   "gpt-5.6-terra": { provider: "openai", modelId: "gpt-5.6-terra" },
   "gpt-5.6-sol": { provider: "openai", modelId: "gpt-5.6-sol" },
-  // Google — v2.43.x: 3.5 Flash → 3.6 Flash si 3.1 Flash Lite → 3.5 Flash
-  // Lite. Cheile interne sunt versionate (precedent GPT-5.6): chei noi
-  // "gemini-flash-3.6" / "gemini-flash-lite-3.5", cheile vechi
-  // ("gemini-flash-3.5", "gemini-flash-lite-3") dispar din catalog —
+  // Google — v2.45.0: 3.6 Flash → 3.7 Flash (3.1 Flash Lite → 3.5 Flash Lite
+  // ramane din v2.43.x). Cheile interne sunt versionate (precedent GPT-5.6):
+  // cheie noua "gemini-flash-3.7", cheile vechi ("gemini-flash-3.5",
+  // "gemini-flash-3.6", "gemini-flash-lite-3") dispar din catalog —
   // requesturile cu ele primesc 400 UNKNOWN_MODEL, iar selectiile salvate
   // sunt re-mapate automat in UI.
   "gemini-flash-lite-3.5": { provider: "google", modelId: "gemini-3.5-flash-lite" },
-  "gemini-flash-3.6": { provider: "google", modelId: "gemini-3.6-flash" },
+  "gemini-flash-3.7": { provider: "google", modelId: "gemini-3.7-flash" },
   "gemini-pro-3": { provider: "google", modelId: "gemini-3.1-pro-preview" },
 };
 
@@ -51,7 +51,7 @@ export const OPENROUTER_MODEL_MAP: Record<string, string> = {
   "gpt-5.6-terra": "openai/gpt-5.6-terra",
   "gpt-5.6-sol": "openai/gpt-5.6-sol",
   "gemini-flash-lite-3.5": "google/gemini-3.5-flash-lite",
-  "gemini-flash-3.6": "google/gemini-3.6-flash",
+  "gemini-flash-3.7": "google/gemini-3.7-flash",
   "gemini-pro-3": "google/gemini-3.1-pro-preview",
 };
 
@@ -482,6 +482,7 @@ export async function withAiLogging<T>(
           output_tokens?: unknown;
           promptTokenCount?: unknown;
           candidatesTokenCount?: unknown;
+          thoughtsTokenCount?: unknown;
         };
       }
     )?.usage;
@@ -491,12 +492,16 @@ export async function withAiLogging<T>(
         : typeof errUsage?.promptTokenCount === "number"
           ? errUsage.promptTokenCount
           : undefined;
-    const usageOutput =
-      typeof errUsage?.output_tokens === "number"
-        ? errUsage.output_tokens
-        : typeof errUsage?.candidatesTokenCount === "number"
-          ? errUsage.candidatesTokenCount
-          : undefined;
+    // v2.45.0: pe forma Google, thinking-ul se factureaza la tarif de output si
+    // NU e inclus in `candidatesTokenCount` — aceeasi corectie ca pe calea de
+    // succes din `callGoogle`, altfel un call platit-si-esuat isi pierde exact
+    // partea scumpa din raportare.
+    const googleOutput =
+      typeof errUsage?.candidatesTokenCount === "number" || typeof errUsage?.thoughtsTokenCount === "number"
+        ? (typeof errUsage?.candidatesTokenCount === "number" ? errUsage.candidatesTokenCount : 0) +
+          (typeof errUsage?.thoughtsTokenCount === "number" ? errUsage.thoughtsTokenCount : 0)
+        : undefined;
+    const usageOutput = typeof errUsage?.output_tokens === "number" ? errUsage.output_tokens : googleOutput;
     logAiCall({
       provider,
       model,
@@ -750,8 +755,20 @@ async function callGoogle(
         { signal: composed as AbortSignal }
       );
       const usage = (
-        result.response as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }
+        result.response as {
+          usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number };
+        }
       ).usageMetadata;
+      // v2.45.0: Google factureaza tokenii de thinking la tariful de output, dar
+      // `candidatesTokenCount` NU ii include — referinta API spune explicit
+      // `totalTokenCount = prompt + thoughts + candidates`. Fara adunarea asta,
+      // costul raportat iese sub cel real pe orice model Gemini cu reasoning
+      // (mandatory pe familia 3.x Flash). `undefined` se pastreaza cand lipsesc
+      // ambele campuri, ca linia de log sa nu afirme 0 pe o metadata absenta.
+      const usageOutput =
+        usage?.candidatesTokenCount === undefined && usage?.thoughtsTokenCount === undefined
+          ? undefined
+          : (usage?.candidatesTokenCount ?? 0) + (usage?.thoughtsTokenCount ?? 0);
       // Idem: orice finishReason diferit de STOP. SAFETY / RECITATION / LANGUAGE arunca
       // deja din text(), dar BLOCKLIST / PROHIBITED_CONTENT / SPII / OTHER nu.
       const finishReason = result.response.candidates?.[0]?.finishReason as string | undefined;
@@ -760,7 +777,7 @@ async function callGoogle(
         value: result.response.text(),
         meta: {
           usageInput: usage?.promptTokenCount,
-          usageOutput: usage?.candidatesTokenCount,
+          usageOutput,
           stopReason: finishReason,
         },
       };
@@ -835,7 +852,14 @@ export async function callOpenRouter(
         | undefined;
       const choice = completion.choices?.[0];
       const content = choice?.message?.content ?? "";
-      if (choice?.finish_reason === "length") truncatedBy = "length";
+      // v2.45.0: paritate cu celelalte trei rute de provider, care din v2.43.3
+      // trateaza ORICE motiv de oprire diferit de "stop" ca taiere. Aici gate-ul
+      // era doar pe "length", deci un raspuns oprit de filtru sau de o eroare de
+      // provider iesea ca analiza completa. Absenta campului NU e taiere: unii
+      // provideri din spatele OpenRouter il omit pe raspunsuri reusite.
+      // `tool_calls` nu poate aparea — body-ul nu trimite niciodata `tools`.
+      const finishReason = choice?.finish_reason as string | undefined;
+      if (finishReason && finishReason !== "stop") truncatedBy = finishReason;
       if (!content.trim()) {
         // F10: diagnosticul OpenRouter pentru raspunsuri goale logheaza doar
         // shape-ul (finish_reason, presence flags, lungimi) si NU continutul

@@ -3,8 +3,10 @@
 # De ce exista: pe stack-ul NAS tot traficul intra prin oauth2-proxy, care
 # redirecteaza orice cerere fara sesiune Google catre login (302). Un client
 # programatic cu `Authorization: Bearer ld_pat_*` nu ajunge niciodata la backend,
-# deci API-ul PAT (v2.40.0) e inaccesibil din afara. Sidecar-ul asta e echivalentul
-# rutei `@pat` din deploy/Caddyfile (stack-ul VPS + Caddy), adaptat pentru NAS.
+# deci API-ul PAT (v2.40.0) e inaccesibil din afara. Sidecar-ul asta rezolva exact
+# problema aia, pe un hostname separat. (Pana in v2.45.0 comentariul de aici
+# spunea ca e "echivalentul rutei @pat din deploy/Caddyfile" — ruta aceea nu
+# exista, deploy/Caddyfile nu are niciun matcher pe token.)
 #
 # NU se poate rezolva prin OAUTH2_PROXY_SKIP_AUTH_ROUTES: cu PASS_BASIC_AUTH=true
 # headerul `Authorization` al clientului nu supravietuieste trecerii prin oauth2-proxy

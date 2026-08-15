@@ -7,7 +7,7 @@ Aplicatie desktop (Electron) + build web viitor pentru:
 2. Interogarea Registrului National de Publicitate Mobiliara (RNPM / mj.rnpm.ro) cu persistenta SQLite locala.
 3. Analiza juridica AI multi-provider (Claude, OpenAI, Gemini) in mod single-agent sau multi-agent (2 analisti + judecator).
 
-- **Versiune curenta**: **v2.44.0** - 2 August 2026. Pentru istoric complet vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (`/changelog`).
+- **Versiune curenta**: **v2.45.0** - 15 August 2026. Pentru istoric complet vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (`/changelog`).
 - **AppId**: `ro.legaldashboard.app`
 - **Produs**: `Legal Dashboard`
 - **Platforme**: Windows (NSIS installer, x64), macOS (DMG, x64 + arm64), Web (build standalone viitor)
@@ -297,7 +297,7 @@ Vezi sectiunea SQLite pentru schema completa. Filtre:
 | | GPT-5.6 Terra (Echilibrat) | `gpt-5.6-terra` | `gpt-5.6-terra` |
 | | GPT-5.6 Sol (Premium) | `gpt-5.6-sol` | `gpt-5.6-sol` |
 | **Google** | Gemini 3.5 Flash Lite (Rapid) | `gemini-flash-lite-3.5` | `gemini-3.5-flash-lite` |
-| | Gemini 3.6 Flash (Echilibrat) | `gemini-flash-3.6` | `gemini-3.6-flash` |
+| | Gemini 3.7 Flash (Echilibrat) | `gemini-flash-3.7` | `gemini-3.7-flash` |
 | | Gemini 3.1 Pro (Premium) | `gemini-pro-3` | `gemini-3.1-pro-preview` |
 
 Modele permise ca **judecator** in multi-agent: `claude-opus`, `gpt-5.6-sol`, `gemini-pro-3`.

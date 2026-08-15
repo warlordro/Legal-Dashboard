@@ -193,26 +193,88 @@ describe("F-C: forma body-ului OpenRouter (v2.43.3)", () => {
   });
 });
 
+describe("paritate de trunchiere pe ruta OpenRouter (v2.45.0)", () => {
+  // v2.43.3 a adus detectia de trunchiere pe toate cele patru cai de provider, dar
+  // aici a ramas un gate doar pe "length". Anthropic, OpenAI si Google trateaza de
+  // atunci ORICE motiv de oprire diferit de "stop" ca taiere; OpenRouter livra un
+  // raspuns oprit de filtru sau de eroare de provider ca analiza completa.
+  // `tool_calls` nu e un caz posibil aici: body-ul nu trimite niciodata `tools`.
+  function mockFinish(finishReason: string | null | undefined, text = "Analiza taiata"): void {
+    openRouterCreateMock.mockResolvedValue({
+      choices: [{ message: { content: text }, finish_reason: finishReason }],
+      usage: { prompt_tokens: 10, completion_tokens: 20 },
+    });
+  }
+
+  it("content_filter -> AI_TRUNCATED, fara sa afirme bugetul de tokeni", async () => {
+    mockFinish("content_filter");
+
+    await expect(callOpenRouter("k".repeat(20), "google/gemini-3.7-flash", "prompt", 5000)).rejects.toMatchObject({
+      code: "AI_TRUNCATED",
+      stopReason: "content_filter",
+      tokenBudget: false,
+    });
+  });
+
+  it("error de la provider -> AI_TRUNCATED", async () => {
+    mockFinish("error");
+
+    await expect(callOpenRouter("k".repeat(20), "google/gemini-3.7-flash", "prompt", 5000)).rejects.toMatchObject({
+      code: "AI_TRUNCATED",
+      stopReason: "error",
+    });
+  });
+
+  it("length ramane taiere pe buget de tokeni", async () => {
+    mockFinish("length");
+
+    await expect(callOpenRouter("k".repeat(20), "google/gemini-3.7-flash", "prompt", 5000)).rejects.toMatchObject({
+      code: "AI_TRUNCATED",
+      tokenBudget: true,
+    });
+  });
+
+  it("stop trece nemodificat", async () => {
+    mockFinish("stop", "Analiza completa");
+
+    await expect(callOpenRouter("k".repeat(20), "google/gemini-3.7-flash", "prompt", 5000)).resolves.toBe(
+      "Analiza completa"
+    );
+  });
+
+  it("finish_reason absent NU e tratat ca taiere", async () => {
+    // Preconditie verificata inainte de a copia sablonul de pe celelalte rute:
+    // unii provideri din spatele OpenRouter omit campul pe raspunsuri reusite.
+    // Un gate pe absenta ar respinge analize bune.
+    mockFinish(undefined, "Analiza completa");
+
+    await expect(callOpenRouter("k".repeat(20), "google/gemini-3.7-flash", "prompt", 5000)).resolves.toBe(
+      "Analiza completa"
+    );
+  });
+});
+
 describe("resolveOpenRouterSlug", () => {
   it("resolves model slugs", () => {
     expect(resolveOpenRouterSlug("claude-sonnet")).toBe(OPENROUTER_MODEL_MAP["claude-sonnet"]);
   });
 
   // Pin literale (NU prin OPENROUTER_MODEL_MAP, altfel testul citeste aceeasi
-  // sursa pe care o citeste functia si nu ar mai prinde regresia). v2.43.x a
-  // bumpuit gemini la 3.6-flash; cheile gemini-flash-3 si gemini-flash-3.5
-  // au fost eliminate.
-  it("pins gemini-flash-3.6 to the v2.43.x slug (regression guard)", () => {
-    expect(resolveOpenRouterSlug("gemini-flash-3.6")).toBe("google/gemini-3.6-flash");
+  // sursa pe care o citeste functia si nu ar mai prinde regresia). v2.45.0 a
+  // bumpuit gemini la 3.7-flash; cheile gemini-flash-3, gemini-flash-3.5 si
+  // gemini-flash-3.6 au fost eliminate.
+  it("pins gemini-flash-3.7 to the v2.45.0 slug (regression guard)", () => {
+    expect(resolveOpenRouterSlug("gemini-flash-3.7")).toBe("google/gemini-3.7-flash");
   });
 
   it("pins gemini-flash-lite-3.5 to the v2.43.x slug (regression guard)", () => {
     expect(resolveOpenRouterSlug("gemini-flash-lite-3.5")).toBe("google/gemini-3.5-flash-lite");
   });
 
-  it("returns null for the retired gemini-flash-3, gemini-flash-3.5 and gemini-flash-lite-3 keys", () => {
+  it("returns null for the retired gemini-flash-3, 3.5, 3.6 and gemini-flash-lite-3 keys", () => {
     expect(resolveOpenRouterSlug("gemini-flash-3")).toBeNull();
     expect(resolveOpenRouterSlug("gemini-flash-3.5")).toBeNull();
+    expect(resolveOpenRouterSlug("gemini-flash-3.6")).toBeNull();
     expect(resolveOpenRouterSlug("gemini-flash-lite-3")).toBeNull();
   });
 

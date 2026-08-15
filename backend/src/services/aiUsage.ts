@@ -75,15 +75,19 @@ const MODEL_PRICES_USD_PER_MILLION: Record<AiUsageProvider, Record<string, Model
     "gpt-5.6-sol": { inputUsdPerMillion: 5, outputUsdPerMillion: 30 },
   },
   google: {
-    // Intrarile 3.1-flash-lite-preview si 3.5-flash raman pentru retry-uri/
-    // cozi in zbor din jurul migrarilor la 3.5-flash-lite / 3.6-flash
-    // (acelasi pattern ca GPT-5.4 mai sus); istoricul are costul stocat la
-    // insert. Pricing 3.6 verificat in catalogul live OpenRouter 2026-07-21;
-    // pricing 3.5-flash-lite verificat 2026-07-22.
+    // Intrarile 3.1-flash-lite-preview, 3.5-flash si 3.6-flash raman pentru
+    // retry-uri/cozi in zbor din jurul migrarilor (acelasi pattern ca GPT-5.4
+    // mai sus); istoricul are costul stocat la insert.
+    // v2.45.0: 3.6 era trecut cu 1.5/7.5 — tariful de DUPA 1 ian 2027 — deci
+    // raporta 2x peste real. TARIF PROMOTIONAL pana la 31 dec 2026 (3.6 si 3.7
+    // identic, verificat pe ai.google.dev/gemini-api/docs/pricing 2026-08-15);
+    // de la 1 ian 2027 Google trece la 1.5/7.5. Tabelul nu are dimensiune
+    // temporala, deci valorile trebuie bumpuite manual la acea data.
     "gemini-3.1-flash-lite-preview": { inputUsdPerMillion: 0.1, outputUsdPerMillion: 0.4 },
     "gemini-3.5-flash-lite": { inputUsdPerMillion: 0.3, outputUsdPerMillion: 2.5 },
     "gemini-3.5-flash": { inputUsdPerMillion: 1.5, outputUsdPerMillion: 9 },
-    "gemini-3.6-flash": { inputUsdPerMillion: 1.5, outputUsdPerMillion: 7.5 },
+    "gemini-3.6-flash": { inputUsdPerMillion: 0.75, outputUsdPerMillion: 3.75 },
+    "gemini-3.7-flash": { inputUsdPerMillion: 0.75, outputUsdPerMillion: 3.75 },
     "gemini-3.1-pro-preview": { inputUsdPerMillion: 1.25, outputUsdPerMillion: 10 },
   },
   openrouter: {
@@ -105,7 +109,15 @@ const MODEL_PRICES_USD_PER_MILLION: Record<AiUsageProvider, Record<string, Model
     "google/gemini-3.1-flash-lite-preview": { inputUsdPerMillion: 0.075, outputUsdPerMillion: 0.3 },
     "google/gemini-3.5-flash-lite": { inputUsdPerMillion: 0.3, outputUsdPerMillion: 2.5 },
     "google/gemini-3.5-flash": { inputUsdPerMillion: 1.5, outputUsdPerMillion: 9 },
-    "google/gemini-3.6-flash": { inputUsdPerMillion: 1.5, outputUsdPerMillion: 7.5 },
+    // v2.45.0: tabelul OpenRouter e DOAR fallback — ruta OpenRouter trimite
+    // `usage: { include: true }` si stocheaza costul real din `usage.cost`.
+    // Valorile de aici sunt pretul de LISTA (identic cu nativul), nu headline-ul
+    // de moment din catalog: 3.7 apare azi la 0.375/1.875, dar acela vine de pe
+    // un endpoint cu `discount: 0.5`, iar catalogul listeaza sase endpointuri
+    // intre 0.1875 si 1.35 input. Un fallback calibrat pe promotie ar subraporta
+    // cand aceasta expira.
+    "google/gemini-3.6-flash": { inputUsdPerMillion: 0.75, outputUsdPerMillion: 3.75 },
+    "google/gemini-3.7-flash": { inputUsdPerMillion: 0.75, outputUsdPerMillion: 3.75 },
     "google/gemini-3.1-pro-preview": { inputUsdPerMillion: 1.25, outputUsdPerMillion: 10 },
   },
 };

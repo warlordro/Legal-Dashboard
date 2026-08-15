@@ -20,7 +20,14 @@
 #   docker compose --env-file .env up -d
 services:
   oauth2-proxy:
-    image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1-alpine@sha256:1a2009d3b05316a5f0a482d8951422cdf100c31fb661fd48f2b4687c87c4ffa1
+    # v2.45.0: bump de la v7.7.1. Sub 7.15.2 se aduna sapte advisories, trei
+    # critice, iar trei dintre ele cad exact pe suprafata folosita aici
+    # (skip_auth_routes + reverse_proxy): CVE-2026-40575 (X-Forwarded-Uri
+    # spoofat), CVE-2025-54576 si CVE-2026-41059 (bypass de skip_auth_routes).
+    # Singurul breaking change relevant intre 7.7 si 7.15 e cel din v7.11.0 —
+    # skip_auth_routes se evalueaza doar pe path, fara query string — iar
+    # rutele de mai jos sunt ancorate pe path, deci comportamentul nu se schimba.
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.3-alpine@sha256:43025b934ab61cbb6792f397334d4ba6024325b4face53f69644b4688ff8e0db
     restart: unless-stopped
     ports:
       # Poarta de autentificare - singurul port atins de tunel.
@@ -89,7 +96,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: legal-dashboard:${APP_VERSION:-2.43.3}
+    image: legal-dashboard:${APP_VERSION:?seteaza APP_VERSION in .env; un default tacut eticheteaza imaginea cu o versiune care minte la rollback si audit}
     restart: unless-stopped
     expose:
       # IMPORTANT: NU inlocui cu `ports:` — backend-ul trebuie sa ramana

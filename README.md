@@ -2,8 +2,8 @@
 
 **Search, monitoring and AI analysis for Romanian court records and movable-property security interests.**
 
-`v2.44.0` · MIT licensed · Node.js ≥ 22 · Windows, macOS, Docker, bare-metal
-57 releases · 2,654 tests (2,211 backend / 443 frontend, Vitest)
+`v2.45.0` · MIT licensed · Node.js ≥ 22 · Windows, macOS, Docker, bare-metal
+58 releases · 2,665 tests (2,222 backend / 443 frontend, Vitest)
 
 *Romanian documentation: [README.ro.md](README.ro.md) · [CHANGELOG.md](CHANGELOG.md) · [SECURITY.md](SECURITY.md) · [RUNBOOK.md](RUNBOOK.md)*
 

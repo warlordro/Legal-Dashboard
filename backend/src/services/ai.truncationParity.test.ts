@@ -98,7 +98,7 @@ describe("paritate de trunchiere pe caile native", () => {
     generateContentMock.mockResolvedValue(geminiResponse("Analiza taiata", "MAX_TOKENS"));
 
     await expect(
-      callModel("gemini-flash-3.6", "prompt", KEYS, 5000, undefined, undefined, NATIVE)
+      callModel("gemini-flash-3.7", "prompt", KEYS, 5000, undefined, undefined, NATIVE)
     ).rejects.toMatchObject({ code: "AI_TRUNCATED", stopReason: "MAX_TOKENS" });
   });
 
@@ -139,7 +139,7 @@ describe("paritate de trunchiere pe caile native", () => {
     generateContentMock.mockResolvedValue(geminiResponse("Analiza taiata", "SPII"));
 
     await expect(
-      callModel("gemini-flash-3.6", "prompt", KEYS, 5000, undefined, undefined, NATIVE)
+      callModel("gemini-flash-3.7", "prompt", KEYS, 5000, undefined, undefined, NATIVE)
     ).rejects.toMatchObject({ code: "AI_TRUNCATED", stopReason: "SPII", tokenBudget: false });
   });
 
@@ -147,14 +147,14 @@ describe("paritate de trunchiere pe caile native", () => {
     generateContentMock.mockResolvedValue(geminiResponse("x", "MAX_TOKENS"));
 
     await expect(
-      callModel("gemini-flash-3.6", "prompt", KEYS, 5000, undefined, undefined, NATIVE)
+      callModel("gemini-flash-3.7", "prompt", KEYS, 5000, undefined, undefined, NATIVE)
     ).rejects.toMatchObject({ tokenBudget: true });
   });
 
   it("Gemini: STOP normal trece nemodificat", async () => {
     generateContentMock.mockResolvedValue(geminiResponse("Analiza completa", "STOP"));
 
-    await expect(callModel("gemini-flash-3.6", "prompt", KEYS, 5000, undefined, undefined, NATIVE)).resolves.toBe(
+    await expect(callModel("gemini-flash-3.7", "prompt", KEYS, 5000, undefined, undefined, NATIVE)).resolves.toBe(
       "Analiza completa"
     );
   });

@@ -41,6 +41,10 @@ Trust assumptions:
 
 Web mode requires `LEGAL_DASHBOARD_JWT_SECRET` (32+ bytes), an issuer, an audience, and `TENANT_KEY_ENCRYPTION_SECRET`. Boot fails fatally if any are missing — the application will not start in a half-configured state.
 
+**Reference reverse proxy (v2.45.0).** The shipped compose files pin `oauth2-proxy` at `v7.15.3-alpine` by digest, raised from `v7.7.1`. Releases below 7.15.2 carry seven published advisories, three of them critical, and three land on the exact surface these files configure — `skip_auth_routes` combined with `reverse_proxy`: CVE-2026-40575 (authentication bypass via spoofed `X-Forwarded-Uri`), CVE-2025-54576 and CVE-2026-41059 (`skip_auth_routes` bypass via query string and fragment confusion). The backend still authenticates every request itself, so the proxy was never the only gate, but an operator running the older pin was relying on a bypassable outer layer. Operators who deployed before v2.45.0 should redeploy to pick up the new image. The only breaking change between 7.7 and 7.15 that touches this configuration is from v7.11.0 — `skip_auth_routes` is evaluated against the path alone, without the query string — and the shipped routes are path-anchored, so their behaviour is unchanged.
+
+The same release added `--trusted-proxy-ip` (`OAUTH2_PROXY_TRUSTED_PROXY_IPS`). Left unset — as the shipped files do, because the correct value is the operator's own proxy address — the proxy trusts `X-Forwarded-*` headers from any source and logs a warning at startup. This was the silent behaviour of every earlier release too; 7.15.2 makes it visible and fixable. Where the proxy's listening port is reachable from a local network, operators should set it to the address their reverse proxy or tunnel actually presents. Deployment guidance is in `DEPLOY-NAS.md`.
+
 ---
 
 ## In scope

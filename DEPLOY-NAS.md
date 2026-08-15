@@ -60,6 +60,11 @@ complet autentificarea Google.
 
 ## 4b. Ruta pentru API-ul programatic (PAT)
 
+> **Stare pe deploymentul curent (verificat 2026-08-15):** ruta e deja instalata si
+> functionala pe `api-dashboard.<domeniu>` — hostname configurat in tunel, CNAME proxied,
+> `caddy-pat` pornit. Probele 2, 3 si 6 de mai jos trec din exterior. Sectiunea ramane
+> scrisa ca procedura de instalare, pentru un stack nou sau pentru reconstructie.
+
 Clientii cu `Authorization: Bearer ld_pat_*` (scripturi, integrari, MCP) nu pot
 trece prin oauth2-proxy: orice cerere fara sesiune Google primeste 302 catre
 login, deci API-ul din [API.md](API.md) e inaccesibil din afara. Solutia e un
@@ -90,13 +95,61 @@ curl -i -H "Authorization: Bearer ld_pat_invalid" https://api-dashboard.<domeniu
 # 3. fara header de autorizare -> 404 de la caddy-pat
 curl -i https://api-dashboard.<domeniu>/api/dosare
 
-# 4. hostname-ul de browser NU s-a largit -> tot 302 catre Google
+# 4. bridge-ul de identitate NU e atins de calea PAT -> 404 (exclusie security-critical)
+curl -i -X POST -H "Authorization: Bearer <token>" https://api-dashboard.<domeniu>/api/v1/auth/oauth2/sync
+
+# 5. token valid pe o ruta din afara capabilitatilor -> 403, nu 200
+curl -i -X POST -H "Authorization: Bearer <token>" https://api-dashboard.<domeniu>/api/rnpm/compact
+
+# 6. hostname-ul de browser NU s-a largit -> tot 302 catre Google
 curl -i -H "Authorization: Bearer <token>" https://dashboard.<domeniu>/api/dosare?numarDosar=1/1/2024
+
+# 7. cautare RNPM reala -> 200 (nu 501, nu 403, nu 429); corpul cererii e in openapi.json
 ```
 
-Daca proba 1 da **426**, `X-Forwarded-Proto: https` nu ajunge la backend (verifica
-`deploy/Caddyfile.pat`). Daca da **403**, tokenul nu are scope-ul rutei. Ruta RNPM
-raspunde **501** pana cand un admin configureaza cheia de captcha la nivel de tenant.
+Interpretarea codurilor: **426** = `X-Forwarded-Proto: https` nu ajunge la backend (verifica
+`deploy/Caddyfile.pat`); **403** = tokenul nu are scope-ul rutei; **429** = cota de captcha
+atinsa (cea per user sau `captchaDailyCap` per token); **501** = cheia de captcha nu e
+configurata la nivel de tenant; **302** = cererea a nimerit tot poarta Google; **404 peste
+tot** = matcher-ul `@pat` nu a prins.
+
+Doua capcane de diagnostic, ambele prin design:
+
+- `/health` raspunde **404** pe hostname-ul de API. Monitorul de uptime ramane pe hostname-ul
+  de browser.
+- Matcher-ul compara `Bearer` **case-sensitive**: un client care trimite `bearer ld_pat_…` cu
+  litera mica primeste 404, fara niciun mesaj. Verificat empiric. Scrie-l in nota de integrare
+  data clientilor, sau treci matcher-ul pe `header_regexp` daca vrei sa fie tolerant.
+
+### Recomandat dupa upgrade-ul la oauth2-proxy 7.15.x: `OAUTH2_PROXY_TRUSTED_PROXY_IPS`
+
+v7.15.2 a introdus `--trusted-proxy-ip`, si odata cu el o problema pe care versiunea veche
+o avea tacut: cand `OAUTH2_PROXY_REVERSE_PROXY` e `true` iar optiunea asta lipseste,
+proxy-ul are incredere in headerele `X-Forwarded-*` primite de la **orice** sursa
+(`0.0.0.0/0`) si scrie un avertisment la pornire — deci vei vedea acel warning in loguri
+dupa upgrade, e asteptat, nu un defect de configuratie.
+
+Conteaza aici pentru ca portul 4180 e publicat pe toate interfetele LAN: orice dispozitiv
+din retea il atinge direct si poate falsifica headerele care decid ce adresa i se atribuie
+cererii. Ca sa inchizi: afla ce sursa vede efectiv oauth2-proxy pentru traficul venit prin
+tunel (`docker logs <container_oauth2-proxy>`, campul de client IP pe o cerere reala), apoi
+adauga in `.env`:
+
+```
+OAUTH2_PROXY_TRUSTED_PROXY_IPS=<IP sau CIDR-ul sursei reale>
+```
+
+Nu ghici valoarea: una gresita face ca loginul sa se construiasca pe schema si adresa
+gresita si te poate bloca in afara aplicatiei. Seteaz-o, reporneste doar oauth2-proxy si
+verifica imediat un login complet.
+
+### `APP_VERSION` e obligatoriu de la v2.45.0
+
+Compose-urile aveau un default tacut (`${APP_VERSION:-2.43.3}`), care ramanea in urma la
+fiecare release si eticheta imaginea noua cu o versiune veche — tag-ul mintea la rollback
+si la audit. Acum variabila e ceruta explicit (`${APP_VERSION:?...}`): daca lipseste din
+`.env`, orice comanda `docker compose` se opreste cu un mesaj clar in loc sa construiasca
+o imagine gresit etichetata. Seteaza-o la versiunea pe care o deployezi.
 
 ### Ce mai verifici o singura data, la prima instalare
 

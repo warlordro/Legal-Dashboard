@@ -13,11 +13,12 @@ describe("dosare-ai-config AI_MODELS", () => {
     expect(keys).not.toContain("qwen-3.7-max");
   });
 
-  it("uses the refreshed Opus 5, 3.6 Flash and 3.5 Lite labels", () => {
+  it("uses the refreshed Opus 5, 3.7 Flash and 3.5 Lite labels", () => {
     expect(AI_MODELS.find((model) => model.key === "claude-opus")?.label).toBe("Opus 5");
-    expect(AI_MODELS.find((model) => model.key === "gemini-flash-3.6")?.label).toBe("3.6 Flash");
+    expect(AI_MODELS.find((model) => model.key === "gemini-flash-3.7")?.label).toBe("3.7 Flash");
     expect(AI_MODELS.find((model) => model.key === "gemini-flash-lite-3.5")?.label).toBe("3.5 Lite");
     expect(AI_MODELS.map((model) => model.key)).not.toContain("gemini-flash-3.5");
+    expect(AI_MODELS.map((model) => model.key)).not.toContain("gemini-flash-3.6");
     expect(AI_MODELS.map((model) => model.key)).not.toContain("gemini-flash-lite-3");
   });
 

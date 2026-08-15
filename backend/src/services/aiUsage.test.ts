@@ -72,6 +72,32 @@ describe("estimateAiCostUsdMilli", () => {
   });
 });
 
+describe("tarifele Gemini Flash — valori exacte", () => {
+  // v2.45.0: 3.6 era trecut cu 1.5/7.5, adica tariful de DUPA 1 ian 2027, deci
+  // costul raportat iesea 2x peste real. Testul de acoperire de mai jos verifica
+  // doar ca pretul e nenul, deci nu ar fi prins niciodata greseala. Aserțiile pe
+  // valoare exacta o blocheaza. 1M tokeni la 0.75 USD/1M = 750 milli-USD.
+  const MILLION = 1_000_000;
+
+  it("nativ: 3.6 si 3.7 Flash sunt la 0.75 / 3.75 USD per 1M", () => {
+    for (const model of ["gemini-3.6-flash", "gemini-3.7-flash"]) {
+      expect(estimateAiCostUsdMilli({ provider: "google", model, inputTokens: MILLION })).toBe(750);
+      expect(estimateAiCostUsdMilli({ provider: "google", model, outputTokens: MILLION })).toBe(3_750);
+    }
+  });
+
+  it("OpenRouter: acelasi pret de LISTA ca nativul, nu promotia de moment", () => {
+    // Tabelul asta e doar fallback (ruta OpenRouter stocheaza costul real primit
+    // in `usage.cost`). Pretul de lista e cel corect aici: headline-ul de 0.375
+    // vine de pe un endpoint cu discount 0.5, iar cand discountul expira un
+    // fallback calibrat pe el ar subraporta.
+    for (const model of ["google/gemini-3.6-flash", "google/gemini-3.7-flash"]) {
+      expect(estimateAiCostUsdMilli({ provider: "openrouter", model, inputTokens: MILLION })).toBe(750);
+      expect(estimateAiCostUsdMilli({ provider: "openrouter", model, outputTokens: MILLION })).toBe(3_750);
+    }
+  });
+});
+
 describe("AI_MODELS price table coverage", () => {
   // Every modelId registered in AI_MODELS must have a matching entry in the
   // price table — otherwise a successful AI call lands a row with cost=0,

@@ -41,6 +41,41 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.45.0",
+    date: "15 August 2026",
+    subtitle:
+      "Modelul Google din analiza AI trece pe Gemini 3.7 Flash, iar raportarea consumului AI arata acum costul real — pana acum il calcula gresit in doua feluri, in directii opuse.",
+    icon: <BrainCircuit className="h-5 w-5" />,
+    borderColor: "border-l-blue-500",
+    badgeClass: "bg-blue-100 text-blue-900 dark:bg-blue-900/30 dark:text-blue-300",
+    sections: [
+      {
+        title: "Gemini 3.7 Flash inlocuieste 3.6 Flash",
+        content:
+          "Slotul 'Echilibrat' de la Google trece pe generatia noua, atat pe ruta nativa cat si prin OpenRouter. Modelul e mai capabil la acelasi profil de viteza si acelasi pret. Daca aveai selectat 3.6 Flash, selectia se muta automat pe un model disponibil la prima deschidere a panoului AI — nu trebuie sa reconfigurezi nimic, doar sa alegi 3.7 Flash daca il vrei ca model preferat.",
+      },
+      {
+        title: "Costul afisat pentru modelele Google era gresit",
+        content:
+          "Doua erori separate se anulau partial si dadeau o cifra in care nu te puteai increde. Prima: tariful trecut pentru 3.6 Flash era cel care intra in vigoare abia in ianuarie 2027, deci fiecare analiza aparea de doua ori mai scumpa decat era. A doua: modelele Google 'gandesc' inainte sa raspunda, iar acea gandire e facturata la fel ca raspunsul — noi o ignoram complet, deci subestimam. Ambele sunt reparate.",
+        bullets: [
+          "Afecteaza doar cifrele din Consum si pragul de avertizare pe buget — factura reala la Google a fost intotdeauna corecta.",
+          "Analizele deja inregistrate pastreaza costul cu care au fost salvate; se corecteaza de aici inainte.",
+        ],
+      },
+      {
+        title: "O analiza oprita la jumatate nu mai arata ca una completa",
+        content:
+          "Cand analiza e rutata prin OpenRouter si modelul se opreste din alt motiv decat terminarea normala — filtru de continut sau o eroare la furnizor — textul partial ajungea la tine fara niciun semn ca ii lipseste finalul. Acum primesti aceeasi eroare clara ca pe celelalte rute si poti reincerca. Pe rutele directe catre Anthropic, OpenAI si Google comportamentul era deja corect.",
+      },
+      {
+        title: "Poarta de autentificare a serverului, actualizata",
+        content:
+          "Componenta care cere login-ul Google inainte de a te lasa in aplicatie (relevanta doar pentru instalarile pe server, nu pentru varianta desktop) era pe o versiune cu vulnerabilitati publicate, dintre care trei permiteau ocolirea ei. Aplicatia isi verifica oricum autentificarea singura, deci nu depindea doar de acest strat, dar componenta a fost urcata la versiunea reparata.",
+      },
+    ],
+  },
+  {
     version: "v2.44.0",
     date: "2 August 2026",
     subtitle:
