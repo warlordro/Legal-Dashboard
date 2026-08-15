@@ -121,24 +121,28 @@ export function useAlertsStream(): UseAlertsStreamResult {
       }
     };
 
+    // EventSource nu trece prin apiFetch, deci nu are interceptorul de 401:
+    // conectarea cu un cookie lipsa sau expirat lasa un `auth.denied` in audit
+    // si se repara abia la urmatorul ciclu de reconectare. ensureWebSession e
+    // ieftin cat timp cookie-ul e proaspat (nu emite request), deci il putem
+    // aseza pe FIECARE conectare — inclusiv pe prima, care la incarcarea paginii
+    // pleaca inaintea sesiunii. In desktop nu exista bridge -> conectam direct.
+    const connectWithSession = () => {
+      if (stopped) return;
+      if (!isWebRuntime()) {
+        connect();
+        return;
+      }
+      void ensureWebSession().finally(() => {
+        if (!stopped) connect();
+      });
+    };
+
     const scheduleReconnect = () => {
       if (stopped || reconnectTimerRef.current !== null) return;
       reconnectTimerRef.current = window.setTimeout(() => {
         reconnectTimerRef.current = null;
-        if (stopped) return;
-        // EventSource nu trece prin apiFetch, deci nu are interceptorul de 401:
-        // dupa o trezire cu cookie expirat se reconecta cu el si backendul
-        // inregistra un `auth.denied` la fiecare incercare. ensureWebSession e
-        // ieftin cat timp cookie-ul e proaspat (fara request), deci il putem
-        // aseza pe fiecare reconectare. In desktop nu exista bridge -> conectam
-        // direct.
-        if (!isWebRuntime()) {
-          connect();
-          return;
-        }
-        void ensureWebSession().finally(() => {
-          if (!stopped) connect();
-        });
+        connectWithSession();
       }, retryMs);
       retryMs = Math.min(retryMs * 2, 30000);
     };
@@ -185,7 +189,7 @@ export function useAlertsStream(): UseAlertsStreamResult {
       };
     };
 
-    connect();
+    connectWithSession();
     return () => {
       stopped = true;
       cleanupSource();
