@@ -96,7 +96,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: legal-dashboard:${APP_VERSION:?seteaza APP_VERSION in .env; un default tacut eticheteaza imaginea cu o versiune care minte la rollback si audit}
+    # v2.45.0: fara default. Unul tacut ramanea in urma la fiecare release si
+    # eticheta imaginea noua cu o versiune veche, deci tag-ul mintea la rollback.
+    image: legal-dashboard:${APP_VERSION:?seteaza APP_VERSION in .env}
     restart: unless-stopped
     expose:
       # IMPORTANT: NU inlocui cu `ports:` — backend-ul trebuie sa ramana
