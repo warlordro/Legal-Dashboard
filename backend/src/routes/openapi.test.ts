@@ -45,6 +45,97 @@ describe("openapi.json", () => {
     );
   });
 
+  // Specul e singurul loc unde un integrator vede campurile FARA sa citeasca un
+  // document: intr-un vizualizator (Swagger UI, Postman, generator de client)
+  // schema de mai jos devine formular. Pana la v2.46.0 ruta de cautare nu avea
+  // corpul descris deloc, deci `includeDetails` si filtrele pe rol erau
+  // invizibile acolo.
+  describe("corpul cererii pe POST /api/rnpm/search", () => {
+    async function searchBodySchema() {
+      const spec = (await (await app().request("/api/v1/openapi.json")).json()) as {
+        paths: Record<
+          string,
+          {
+            post?: {
+              requestBody?: {
+                required?: boolean;
+                content: { "application/json": { schema: Record<string, never> } };
+              };
+            };
+          }
+        >;
+      };
+      const body = spec.paths["/api/rnpm/search"]?.post?.requestBody;
+      return {
+        body,
+        schema: body?.content["application/json"].schema as unknown as {
+          required?: string[];
+          properties: Record<string, { type?: string; enum?: string[]; description?: string; properties?: unknown }>;
+        },
+      };
+    }
+
+    it("descrie corpul ca JSON obligatoriu, cu `type` si `params` cerute", async () => {
+      const { body, schema } = await searchBodySchema();
+      expect(body?.required).toBe(true);
+      expect(schema.required).toEqual(expect.arrayContaining(["type", "params"]));
+      expect(schema.properties.type?.enum).toEqual(["ipoteci", "fiducii", "specifice", "creante", "obligatiuni"]);
+    });
+
+    it("expune `includeDetails` ca boolean explicat, nu doar in text liber", async () => {
+      const { schema } = await searchBodySchema();
+      const flag = schema.properties.includeDetails;
+      expect(flag?.type).toBe("boolean");
+      // Descrierea e ce citeste omul in formular; fara ea bifa nu spune nimic.
+      expect(flag?.description).toMatch(/aviz\.id/);
+    });
+
+    it("expune filtrele pe rol cu scrierea exacta a cheilor, care nu e uniforma", async () => {
+      const { schema } = await searchBodySchema();
+      const params = schema.properties.params as { properties?: Record<string, unknown> };
+      const keys = Object.keys(params.properties ?? {});
+      // Majusculele difera intre roluri; o cheie scrisa gresit e ignorata tacut,
+      // deci specul trebuie sa le arate exact asa cum le asteapta registrul.
+      expect(keys).toEqual(expect.arrayContaining(["creditorPJ", "CreditorPF", "debitorPJ", "debitorPF"]));
+    });
+
+    it('explica operatorul SI/SAU al criteriilor, altfel `type: "1"` e un numar fara sens', async () => {
+      const spec = (await (await app().request("/api/v1/openapi.json")).json()) as {
+        components: { schemas?: Record<string, { properties?: { type?: { enum?: string[]; description?: string } } }> };
+      };
+      const siSau = spec.components.schemas?.RnpmCriteriu;
+      expect(siSau?.properties?.type?.enum).toEqual(["1", "2"]);
+      expect(siSau?.properties?.type?.description).toMatch(/SI/);
+      expect(siSau?.properties?.type?.description).toMatch(/SAU/);
+    });
+  });
+
+  it("toate `$ref`-urile din spec au tinta existenta", async () => {
+    // Un `$ref` care nu rezolva nu da eroare la generare: campul apare pur si
+    // simplu GOL in vizualizator, deci integratorul nu vede criteriile deloc.
+    const spec = (await (await app().request("/api/v1/openapi.json")).json()) as Record<string, unknown>;
+    const refs: string[] = [];
+    const walk = (node: unknown) => {
+      if (Array.isArray(node)) return node.forEach(walk);
+      if (!node || typeof node !== "object") return;
+      for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+        if (k === "$ref" && typeof v === "string") refs.push(v);
+        else walk(v);
+      }
+    };
+    walk(spec);
+
+    expect(refs.length).toBeGreaterThan(0);
+    for (const ref of refs) {
+      const target = ref.replace(/^#\//, "").split("/");
+      let cursor: unknown = spec;
+      for (const seg of target) {
+        cursor = (cursor as Record<string, unknown> | undefined)?.[seg];
+      }
+      expect(cursor, `${ref} nu rezolva`).toBeDefined();
+    }
+  });
+
   it("overrides bearer auth with session-cookie auth on token-management routes", async () => {
     const spec = (await (await app().request("/api/v1/openapi.json")).json()) as {
       components: { securitySchemes: Record<string, unknown> };

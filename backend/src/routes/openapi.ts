@@ -46,6 +46,119 @@ function paramsFor(prefix: string): unknown[] {
   return [];
 }
 
+// Un criteriu de cautare RNPM: valoarea plus operatorul logic fata de celelalte
+// criterii. `type` e "1"/"2" pentru ca asa le numeroteaza registrul; fara
+// explicatie in spec, un integrator vede un numar fara sens si ghiceste.
+const CRITERIU_REF = { $ref: "#/components/schemas/RnpmCriteriu" };
+
+function rnpmCriteriuSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    required: ["type", "value"],
+    properties: {
+      type: {
+        type: "string",
+        enum: ["1", "2"],
+        description: 'Operator fata de celelalte criterii: "1" = SI, "2" = SAU.',
+      },
+      value: { type: "string", description: "Valoarea cautata." },
+    },
+  };
+}
+
+// Filtrele pe rol. Scrierea cheilor NU e uniforma — e copiata dupa cea a
+// registrului: `creditorPJ.regCom` are `r` mic, `debitorPJ.RegCom` are `R` mare,
+// `CreditorPF` incepe cu majuscula iar `debitorPF` nu. O cheie scrisa gresit e
+// ignorata in tacere (filtrul nu se aplica, raspunsul contine tot), deci specul
+// e locul unde integratorul le vede exact, fara sa citeasca documentatia.
+function rnpmSearchParamsSchema(): Record<string, unknown> {
+  const persoanaJuridica = (regComKey: "regCom" | "RegCom") => ({
+    type: "object",
+    properties: {
+      denumire: { type: "string" },
+      [regComKey]: CRITERIU_REF,
+      CUI: CRITERIU_REF,
+    },
+  });
+  const persoanaFizica = {
+    type: "object",
+    properties: {
+      nume: { type: "string" },
+      prenume: CRITERIU_REF,
+      CNP: CRITERIU_REF,
+    },
+  };
+  return {
+    type: "object",
+    description:
+      "Criteriile de cautare. Atentie la scrierea cheilor — nu e uniforma (vine de la registru), " +
+      "iar o cheie gresita e ignorata TACIT: filtrul nu se aplica si raspunsul contine tot.",
+    properties: {
+      creditorPJ: persoanaJuridica("regCom"),
+      CreditorPF: persoanaFizica,
+      debitorPJ: persoanaJuridica("RegCom"),
+      debitorPF: persoanaFizica,
+      tipInscriere: CRITERIU_REF,
+      perioadaStart: { type: "string", description: "Format zz.ll.aaaa." },
+      perioadaFinal: { type: "string", description: "Format zz.ll.aaaa." },
+      activ: { type: "boolean" },
+    },
+  };
+}
+
+function rnpmSearchRequestBody(): Record<string, unknown> {
+  return {
+    required: true,
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          required: ["type", "params"],
+          properties: {
+            type: {
+              type: "string",
+              enum: ["ipoteci", "fiducii", "specifice", "creante", "obligatiuni"],
+              description: "Tipul de inscriere cautat.",
+            },
+            params: rnpmSearchParamsSchema(),
+            includeDetails: {
+              type: "boolean",
+              default: false,
+              description:
+                "Adauga `details[]` = avizele complete, in aceeasi forma ca `GET /api/rnpm/saved/{id}`. " +
+                "Coreleaza-le pe `aviz.id` contra valorilor din `avizIds`, NU pe pozitie: fiecare aviz apare " +
+                "o singura data in `details`, desi poate aparea de doua ori in `avizIds`. Nu costa nicio " +
+                "captcha in plus. Doar `true` boolean activeaza campul.",
+            },
+            startRnpmPage: {
+              type: "integer",
+              minimum: 1,
+              maximum: 500,
+              default: 1,
+              description: "Pagina de start; continua de la `nextRnpmPage` din raspunsul precedent.",
+            },
+            batchSize: {
+              type: "integer",
+              minimum: 1,
+              maximum: 200,
+              default: 25,
+              description: "Cate avize se aduc intr-o cerere.",
+            },
+            gcode: {
+              type: "string",
+              description: "Token-ul de sesiune al registrului, din raspunsul precedent. Doar la paginare.",
+            },
+            searchId: {
+              type: "integer",
+              description: "Cautarea existenta careia i se adauga paginile. Doar la paginare.",
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
 function operationFor(method: string, prefix: string, scope: string): Record<string, unknown> {
   const op: Record<string, unknown> = {
     summary: SCOPE_SUMMARY[scope] ?? prefix,
@@ -71,6 +184,7 @@ function operationFor(method: string, prefix: string, scope: string): Record<str
       "Raspuns imbogatit: `exactMatch` (boolean, DOAR pe numar dosar) + `parti[].calitateParte`. Forma legacy `{ data, total, exactMatch }`. Optional `failedInstitutii: string[]` = raspuns 200 cu rezultate PARTIALE (instantele listate nu au raspuns, dosarele lor lipsesc; inainte de v2.43.1 acest caz era eroare 500).";
   }
   if (prefix === "/api/rnpm/search") {
+    op.requestBody = rnpmSearchRequestBody();
     op.description =
       "Cautare RNPM dupa rol debitor/creditor; paginare prin `startRnpmPage` (body) -> `nextRnpmPage`. " +
       "Optional `includeDetails: true` (boolean strict) adauga `details[]` = avizele complete, in aceeasi " +
@@ -146,6 +260,9 @@ export function buildOpenApiSpec(): Record<string, unknown> {
         bearerAuth: { type: "http", scheme: "bearer", description: "Authorization: Bearer ld_pat_..." },
         // Rutele de management tokenuri (/api/v1/tokens*) se autentifica prin sesiune, nu PAT.
         sessionCookie: { type: "apiKey", in: "cookie", name: "legal_dashboard_session" },
+      },
+      schemas: {
+        RnpmCriteriu: rnpmCriteriuSchema(),
       },
     },
     security: [{ bearerAuth: [] }],
