@@ -2,8 +2,8 @@
 
 **Search, monitoring and AI analysis for Romanian court records and movable-property security interests.**
 
-`v2.45.0` · MIT licensed · Node.js ≥ 22 · Windows, macOS, Docker, bare-metal
-58 releases · 2,665 tests (2,222 backend / 443 frontend, Vitest)
+`v2.46.0` · MIT licensed · Node.js ≥ 22 · Windows, macOS, Docker, bare-metal
+58 releases · 2,680 tests (2,237 backend / 443 frontend, Vitest)
 
 *Romanian documentation: [README.ro.md](README.ro.md) · [CHANGELOG.md](CHANGELOG.md) · [SECURITY.md](SECURITY.md) · [RUNBOOK.md](RUNBOOK.md)*
 
@@ -204,7 +204,7 @@ Useful to know before you start: I'm a financial-risk and AML professional rathe
 Areas where help would matter most:
 
 - Extracting the PortalJust SOAP and RNPM integration layers into standalone, publishable libraries — they're the parts other people would actually want
-- Test coverage on the frontend, which trails the backend considerably (431 tests against 2,171)
+- Test coverage on the frontend, which trails the backend considerably (443 tests against 2,237)
 - Accessibility, which has had no serious attention
 - Anything in the Romanian-only documentation that should be in English
 

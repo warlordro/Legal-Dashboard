@@ -41,6 +41,32 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.46.0",
+    date: "16 August 2026",
+    subtitle:
+      "Programele care se conecteaza la aplicatie prin token pot cere acum toate detaliile avizelor dintr-o singura cerere. In aplicatie nu se schimba nimic.",
+    icon: <Layers className="h-5 w-5" />,
+    borderColor: "border-l-teal-500",
+    badgeClass: "bg-teal-100 text-teal-900 dark:bg-teal-900/30 dark:text-teal-300",
+    sections: [
+      {
+        title: "Detaliile avizelor, dintr-o singura cerere",
+        content:
+          "Pana acum, un program care cauta in RNPM prin API primea lista de avize, apoi trebuia sa ceara separat detaliile fiecaruia — pentru 25 de avize, 26 de cereri. Acum le poate primi pe toate deodata. Nu costa nicio captcha in plus si nu adauga nicio interogare la registru: detaliile sunt deja aduse in timpul cautarii, doar ca pana acum nu erau trimise inapoi.",
+      },
+      {
+        title: "Ce se schimba pentru tine: nimic",
+        content:
+          "Aplicatia (desktop si web) afiseaza detaliile din baza proprie si nu foloseste optiunea noua, deci cautarile arata si merg exact la fel. Schimbarea conteaza doar daca ai dat cuiva un token de acces API ca sa se conecteze la aplicatie din alt program.",
+      },
+      {
+        title: "Filtrarea dupa creditor: atentie la scriere",
+        content:
+          "Documentatia pentru integratori a primit tabelul cu denumirile exacte ale campurilor de filtrare. Motivul: denumirile sunt preluate de la registrul RNPM si nu sunt scrise uniform (unele incep cu litera mare, altele cu mica). Daca un program scrie gresit o denumire, filtrul e ignorat fara niciun mesaj de eroare si raspunsul contine toate rezultatele, nu doar cele cerute.",
+      },
+    ],
+  },
+  {
     version: "v2.45.0",
     date: "15 August 2026",
     subtitle:

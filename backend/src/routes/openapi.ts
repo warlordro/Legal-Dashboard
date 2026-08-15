@@ -71,7 +71,13 @@ function operationFor(method: string, prefix: string, scope: string): Record<str
       "Raspuns imbogatit: `exactMatch` (boolean, DOAR pe numar dosar) + `parti[].calitateParte`. Forma legacy `{ data, total, exactMatch }`. Optional `failedInstitutii: string[]` = raspuns 200 cu rezultate PARTIALE (instantele listate nu au raspuns, dosarele lor lipsesc; inainte de v2.43.1 acest caz era eroare 500).";
   }
   if (prefix === "/api/rnpm/search") {
-    op.description = "Cautare RNPM dupa rol debitor/creditor; paginare prin `startRnpmPage` (body) -> `nextRnpmPage`.";
+    op.description =
+      "Cautare RNPM dupa rol debitor/creditor; paginare prin `startRnpmPage` (body) -> `nextRnpmPage`. " +
+      "Optional `includeDetails: true` (boolean strict) adauga `details[]` = avizele complete, in aceeasi " +
+      "forma ca `GET /api/rnpm/saved/{id}`; fara camp raspunsul ramane neschimbat. Coreleaza pe `aviz.id` " +
+      "contra `avizIds`, NU pe pozitie: fiecare aviz apare o singura data in `details`, desi poate aparea " +
+      "de doua ori in `avizIds`. Avizele fara detalii aduse lipsesc din `details` si apar in `detailsFailed`. " +
+      "Daca citirea detaliilor esueaza, `details` lipseste din raspuns, restul campurilor raman intacte.";
   }
   return op;
 }

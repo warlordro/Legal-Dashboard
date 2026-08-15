@@ -1,5 +1,21 @@
 # Changelog - Legal Dashboard
 
+## v2.46.0 - 2026-08-16
+
+Un singur feature, cerut de integratorul care consuma API-ul RNPM prin token: detaliile avizelor pot veni direct in raspunsul cautarii, in loc sa fie cerute una cate una dupa aceea.
+
+**1. `includeDetails` pe `POST /api/rnpm/search`.** Pana acum raspunsul cautarii continea lista documentelor si `avizIds` — id-urile din baza — iar detaliile fiecarui aviz (creditori, debitori, bunuri, istoric) se luau apoi printr-un `GET /api/rnpm/saved/{id}` separat, deci o cautare de 25 de avize insemna 26 de cereri. Cu `"includeDetails": true` in corpul cererii, raspunsul poarta in plus `details[]`, unde fiecare element are **exact** forma data de `GET /api/rnpm/saved/{id}`, deci integratorul scrie un singur parser pentru ambele rute.
+
+Nu costa nimic in plus la sursa: detaliile sunt deja aduse din registru in timpul cautarii si scrise in baza inainte ca raspunsul sa se construiasca (`avizIds` e chiar dovada ca s-au scris). Ruta doar le citeste inapoi si le ataseaza — zero cereri noi catre RNPM, zero captcha in plus. Ordinea din `details` urmeaza `avizIds`, adica ordinea documentelor, nu ordinea in care le da baza (`ORDER BY id DESC`).
+
+Corelarea recomandata ramane insa pe `aviz.id`, nu pe pozitie, si documentatia o spune explicit: fiecare aviz apare o singura data in `details`, dar acelasi aviz poate aparea de doua ori in `avizIds` — avizele se scriu prin upsert pe `(owner_id, identificator)`, deci doua documente cu acelasi identificator trimit la acelasi rand din baza. Un client care ar imperechea dupa pozitie ar iesi decalat fara niciun semnal. Punctul a fost gasit independent de ambele review-uri externe de la finalul release-ului.
+
+Campul e **opt-in strict**, comparat cu `=== true`: un `"true"` ca text sau un `1` nu il activeaza. Fara camp, raspunsul e byte-identic cu cel dinainte — pinuit de testul de caracterizare pe setul exact de chei, care ar cadea daca `details` ar aparea neconditionat. Motivul pentru care nu e mereu inclus: aplicatia proprie isi afiseaza oricum detaliile din baza locala, deci ar fi platit de zece ori marimea raspunsului degeaba. La `batchSize` maxim (200 de avize) raspunsul ajunge pe la ~860 KB, fara plafon server-side si fara trunchiere tacuta.
+
+Doua situatii tratate explicit, ambele acoperite de teste. Avizele ale caror detalii nu au putut fi aduse **lipsesc** din `details` in loc sa apara ca `null`, iar `detailsFailed` ramane singurul semnal — deci `details.length` poate fi mai mic decat `documents.length`. Si daca citirea de la final esueaza cu totul (cazul real: o restaurare de baza pornita chiar in fereastra de dupa cautare), raspunsul iese 200 cu toate campurile de azi si **fara** `details`, in loc de 500: cautarea e platita cu captcha si a reusit, iar clientul poate lua detaliile prin `GET /api/rnpm/saved/{id}`. Se aplica identic pe transportul in flux (`Accept: text/event-stream`), si **doar** pe `/search` — `/bulk` si `/search-split` ignora campul.
+
+**2. Documentatia de integrare: cheile de filtrare pe rol.** `API.md` are o sectiune noua (§5b) cu contractul de mai sus si cu tabelul cheilor exacte pentru filtrarea dupa creditor si debitor. Motivul e o capcana reala: cheile sunt copiate dupa cele ale registrului RNPM, deci majusculele nu sunt uniforme — `creditorPJ.regCom` are `r` mic, `debitorPJ.RegCom` are `R` mare, iar `CreditorPF` incepe cu majuscula in timp ce `debitorPF` nu. O cheie scrisa gresit e **ignorata in tacere**: filtrul nu se aplica, raspunsul contine tot, si clientul nu primeste niciun avertisment. Semnul ca filtrul a functionat ramane scaderea numarului de rezultate fata de aceeasi cautare fara filtru.
+
 ## v2.45.0 - 2026-08-15
 
 Refresh de model AI pe slotul "Echilibrat" Google, plus doua corectii de raportare a costului descoperite in timpul verificarii preturilor si un bump de securitate pe poarta de autentificare a deployurilor de server. Tot ce priveste preturile a fost verificat live inainte de scriere (catalogul OpenRouter si `ai.google.dev/gemini-api/docs/pricing`, 2026-08-15), nu preluat din plan.

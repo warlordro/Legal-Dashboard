@@ -66,11 +66,54 @@ ca `string | { code, message }`:
   `exactMatch` e garantat DOAR cand `failedInstitutii` lipseste: un dosar cu numar exact poate
   exista intr-o instanta picata, deci `exactMatch=false` pe raspuns partial nu inseamna absenta certa.
 - **`/api/rnpm/saved`**: obiect paginat brut.
-- **`/api/rnpm/search`**: rol = dimensiunea de cautare **debitor/creditor**.
+- **`/api/rnpm/search`**: rol = dimensiunea de cautare **debitor/creditor**. Implicit raspunsul contine
+  lista (`documents`) plus `avizIds` (id-ul din baza pentru fiecare document, `null` unde detaliile nu au
+  putut fi aduse) si `detailsFailed`. Cu **`includeDetails: true`** in corpul cererii apare in plus
+  **`details[]`** — avizele complete, in **exact aceeasi forma** ca `GET /api/rnpm/saved/{id}`, deci un
+  singur parser pentru ambele rute. Detalii in §5b.
 - **Rutele `/api/v1/*` care folosesc `ok()`/`fail()`** (token-management + celelalte v1 cu envelope)
   garanteaza `{ data, error: { code, message }, requestId }`. **Exceptii in `/api/v1/*`:**
   `GET /api/v1/openapi.json` intoarce specul OpenAPI brut (NU envelope), iar rutele de export
   (`/api/v1/dosare/export.xlsx` etc.) intorc binar/stream — deci „`/api/v1/*` = envelope" NU e universal.
+
+## 5b. RNPM `POST /api/rnpm/search` — detalii in raspuns si chei de filtrare
+
+### `includeDetails` (din v2.46.0)
+
+Implicit, raspunsul cautarii da doar lista si id-urile; detaliile fiecarui aviz se luau apoi una cate una
+prin `GET /api/rnpm/saved/{id}`. Trimite **`"includeDetails": true`** in corpul cererii ca sa le primesti pe
+toate dintr-un singur raspuns.
+
+| Aspect | Comportament |
+|--------|--------------|
+| Activare | **Strict `true` boolean.** `"true"` ca text, `1`, sau campul absent NU activeaza nimic. |
+| Fara camp | Raspunsul e **identic** cu cel dinainte de v2.46.0 — `details` nici nu apare. |
+| Forma `details[]` | Fiecare element e **exact** obiectul dat de `GET /api/rnpm/saved/{id}`: `{ aviz, creditori, debitori, bunuri, istoric }`. Un singur parser acopera ambele rute. |
+| Corelare | **Fa-o pe `aviz.id` contra valorilor din `avizIds`** — asta e mereu corect. NU corela pe pozitie: `details` contine fiecare aviz **o singura data**, iar acelasi aviz poate aparea de doua ori in `avizIds` (registrul poate livra acelasi identificator in doua randuri, si atunci ambele trimit la acelasi rand din baza). Pozitiile ies decalate fara niciun semnal. |
+| Ordine | Urmeaza prima aparitie in `avizIds`, adica ordinea documentelor — nu ordinea bazei. |
+| Avize fara detalii | **Lipsesc** din `details` (nu apar ca `null`). `details.length` poate fi mai mic decat `documents.length`. Cele care au esuat la aducerea din registru sunt listate in `detailsFailed`; un id prezent in `avizIds` dar absent din `details` **fara** intrare corespunzatoare in `detailsFailed` inseamna ca avizul nu mai era in baza la momentul citirii (sters sau restaurare intre timp) — ia-l cu `GET /api/rnpm/saved/{id}`. |
+| Zero avize salvate | `details` e lista goala `[]`, nu camp absent. |
+| Esec la citire | `details` **lipseste** din raspuns, restul campurilor raman intacte, statusul ramane 200. Ia detaliile prin `GET /api/rnpm/saved/{id}`. Absenta campului dupa ce l-ai cerut = exact acest caz. |
+| Cost | **Zero cereri noi catre RNPM, zero captcha in plus.** Detaliile sunt deja aduse si salvate in timpul cautarii; se citesc din baza locala. |
+| Marime | ~4,3 KB per aviz cu detalii complete. La `batchSize` maxim (200) raspunsul ajunge pe la ~860 KB — nu exista plafon server-side pe raspuns si nici trunchiere tacuta. |
+
+Se aplica si pe transportul in flux (`Accept: text/event-stream`): acelasi corp, livrat in evenimentul
+`result`. **Doar pe `/api/rnpm/search`** — `/api/rnpm/bulk` si `/api/rnpm/search-split` ignora campul.
+
+### Chei de filtrare pe rol — scrierea conteaza
+
+Cheile din `params` sunt copiate dupa cele ale registrului RNPM, deci **majusculele nu sunt uniforme**.
+O cheie scrisa gresit e **ignorata in tacere**: filtrul nu se aplica, raspunsul contine tot, si nu primesti
+niciun avertisment. Verifica scrierea caracter cu caracter.
+
+| Rol | Cheia exacta | Subcampuri |
+|-----|--------------|------------|
+| Creditor persoana juridica | `creditorPJ` | `denumire`, `regCom` (**`r` mic**), `CUI` |
+| Creditor persoana fizica | `CreditorPF` (**`C` mare**) | `nume`, `prenume`, `CNP` |
+| Debitor persoana juridica | `debitorPJ` | `denumire`, `RegCom` (**`R` mare**), `CUI` |
+| Debitor persoana fizica | `debitorPF` (**`d` mic**) | `nume`, `prenume`, `CNP` |
+
+Semnul ca filtrul a fost aplicat: numarul de rezultate scade fata de aceeasi cautare fara filtru.
 
 ## 6. Coduri de eroare
 

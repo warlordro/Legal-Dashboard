@@ -138,6 +138,7 @@ const SSE_TIMEOUT_MS = 5400000;
 // captcha si retry, 45 min e suficient cu margin.
 const SSE_SPLIT_TIMEOUT_MS = 2700000;
 import {
+  type AvizFull,
   getAvize,
   getAvizById,
   deleteAviz,
@@ -200,7 +201,11 @@ const SEARCH_STREAM_TIMEOUT_MS = INFLIGHT_TTL_SEARCH_MS;
 // Corpul de succes se construieste camp cu camp, NU prin spread peste rezultatul
 // serviciului: `ExecuteSearchResult` are campuri interne care nu se expun (ex.
 // `captchasUsed`). Pinuit de rnpm.searchPayload.characterization.test.ts.
-function searchSuccessPayload(result: Awaited<ReturnType<typeof executeSearch>>) {
+//
+// `details` apare DOAR cand clientul l-a cerut prin `includeDetails: true`
+// (v2.46.0). `undefined` = fie nu s-a cerut, fie citirea a esuat; lista goala =
+// s-a cerut si nu exista niciun aviz salvat.
+function searchSuccessPayload(result: Awaited<ReturnType<typeof executeSearch>>, details?: AvizFull[]) {
   return {
     searchId: result.searchId,
     total: result.total,
@@ -213,7 +218,52 @@ function searchSuccessPayload(result: Awaited<ReturnType<typeof executeSearch>>)
     detailsFailed: result.detailsFailed,
     gcode: result.gcode,
     nextRnpmPage: result.nextRnpmPage,
+    ...(details ? { details } : {}),
   };
+}
+
+// v2.46.0 — detaliile complete ale avizelor gasite, atasate raspunsului cautarii
+// la cerere. Integratorul primea doar `avizIds` si trebuia sa faca N cereri
+// `GET /saved/:id` dupa fiecare cautare.
+//
+// Costul e o singura citire din baza: detaliile sunt DEJA aduse din registru in
+// timpul cautarii si scrise inainte ca raspunsul sa se construiasca. Nicio cerere
+// noua catre RNPM, nicio captcha in plus.
+//
+// Ordinea urmeaza prima aparitie in `avizIds` (ordinea documentelor), nu ordinea
+// bazei — `getAvizeByIds` intoarce `ORDER BY id DESC`.
+//
+// Lista e DEDUPLICATA: acelasi aviz poate aparea de doua ori in `avizIds` (upsert
+// pe `(owner_id, identificator)`, deci doua documente cu acelasi identificator
+// primesc acelasi id). Consecinta pentru contract: clientul coreleaza pe
+// `aviz.id`, NU pe pozitie — scris explicit in API.md §5b, fiindca o corelare
+// pozitionala ar iesi decalata fara niciun semnal.
+function readSearchDetails(result: Awaited<ReturnType<typeof executeSearch>>, ownerId: string): AvizFull[] | undefined {
+  const ids: number[] = [];
+  const seen = new Set<number>();
+  for (const id of result.avizIds) {
+    if (id == null || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  if (ids.length === 0) return [];
+  try {
+    const byId = new Map(getAvizeByIds(ids, ownerId).map((a) => [a.aviz.id, a]));
+    // Avizele care lipsesc din baza (detalii neaduse, stergere concurenta) sunt
+    // SARITE, nu emise ca `null`: `detailsFailed` ramane singurul semnal, iar
+    // clientul nu trebuie sa filtreze goluri.
+    return ids.map((id) => byId.get(id)).filter((a): a is AvizFull => a !== undefined);
+  } catch (e) {
+    // Degradare deliberata. Cautarea a reusit si e platita cu captcha; daca
+    // citirea de la final e refuzata (ex. o restaurare de baza pornita intre
+    // timp), clientul primeste raspunsul intreg fara sectiunea de detalii si le
+    // poate lua prin `GET /saved/:id`. Un 500 ar arunca toata cautarea.
+    console.error(
+      "[rnpm/search] includeDetails: citirea detaliilor a esuat:",
+      e instanceof Error ? e.message : String(e)
+    );
+    return undefined;
+  }
 }
 
 function wantsEventStream(c: import("hono").Context): boolean {
@@ -267,6 +317,11 @@ function streamSearchAsSSE(
     dedupKey: string | null;
     controller: AbortController;
     onDone: () => void;
+    // Fluxul respecta `includeDetails` la fel ca raspunsul JSON: acelasi corp,
+    // alt transport. Detaliile se citesc dupa ce cautarea s-a incheiat, deci
+    // inainte de evenimentul terminal.
+    ownerId: string;
+    includeDetails: boolean;
   }
 ) {
   return streamSSE(c, async (stream) => {
@@ -298,7 +353,8 @@ function streamSearchAsSSE(
       const result = await run;
       clearInterval(ping);
       await pending;
-      await stream.writeSSE({ event: "result", data: JSON.stringify(searchSuccessPayload(result)) });
+      const details = opts.includeDetails ? readSearchDetails(result, opts.ownerId) : undefined;
+      await stream.writeSSE({ event: "result", data: JSON.stringify(searchSuccessPayload(result, details)) });
     } catch (e) {
       clearInterval(ping);
       await pending;
@@ -425,16 +481,23 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
       detail: { provider: guard.captchaProvider ?? null, mode: guard.captchaMode ?? null, route: "search" },
     });
   }
-  const { type, params, captchaProvider, captchaMode, startRnpmPage, batchSize, gcode, searchId } = (body ?? {}) as {
-    type?: unknown;
-    params?: unknown;
-    captchaProvider?: unknown;
-    captchaMode?: unknown;
-    startRnpmPage?: unknown;
-    batchSize?: unknown;
-    gcode?: unknown;
-    searchId?: unknown;
-  };
+  const { type, params, captchaProvider, captchaMode, startRnpmPage, batchSize, gcode, searchId, includeDetails } =
+    (body ?? {}) as {
+      type?: unknown;
+      params?: unknown;
+      captchaProvider?: unknown;
+      captchaMode?: unknown;
+      startRnpmPage?: unknown;
+      batchSize?: unknown;
+      gcode?: unknown;
+      searchId?: unknown;
+      includeDetails?: unknown;
+    };
+
+  // Strict `=== true`: un `"true"` text sau un `1` nu activeaza sectiunea de
+  // detalii. Contractul e opt-in, deci orice altceva decat boolean-ul adevarat
+  // pastreaza raspunsul istoric.
+  const wantsDetails = includeDetails === true;
 
   if (!isValidType(type)) return invalidParams(c, "Tip cautare invalid");
   if (!params || typeof params !== "object") return invalidParams(c, "Parametri cautare lipsa");
@@ -510,12 +573,15 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
       dedupKey,
       controller: searchAbort,
       onDone: () => c.req.raw.signal?.removeEventListener?.("abort", onRequestAbort),
+      ownerId,
+      includeDetails: wantsDetails,
     });
   }
 
   try {
     const result = await run;
-    return c.json(searchSuccessPayload(result));
+    const details = wantsDetails ? readSearchDetails(result, ownerId) : undefined;
+    return c.json(searchSuccessPayload(result, details));
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") {
       console.log("[rnpm/search] aborted by client");
