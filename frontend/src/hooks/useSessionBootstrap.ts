@@ -37,6 +37,14 @@ function isDesktopRuntime(): boolean {
 // neconditionata dupa epuizarea lui.
 const RETRY_DELAYS_MS = [1000, 2000] as const;
 
+// Plafon propriu, mai scurt, pe REINCERCARI. Prima incercare pastreaza cele 10s
+// implicite ale bridge-ului; daca ea a expirat, upstream-ul atarna (nu refuza), si
+// nu are rost ca fiecare reincercare sa mai astepte inca 10s. Fara asta, cazul
+// "backend blocat" tinea utilizatorul pe ecranul de asteptare ~33s in loc de ~10s
+// cat era inainte de acest pas — o degradare a unui caz-margine, adusa chiar de
+// fixul care trebuia sa ajute.
+const RETRY_ATTEMPT_TIMEOUT_MS = 3000;
+
 // Doar esecurile tranzitorii se reincearca. `not_provisioned` (cont inexistent
 // sau inactiv) si `unavailable` (configurare de server invalida) dau acelasi
 // raspuns oricat s-ar reincerca, iar utilizatorul ar astepta degeaba inainte sa
@@ -68,17 +76,30 @@ export function useSessionBootstrap(): SessionBootstrap {
     cancelled.current = false;
 
     const attempt = (index: number): void => {
-      void syncWebSession().then((result) => {
-        if (cancelled.current) return;
-        setStatus(result);
-        if (isTransient(result) && index < RETRY_DELAYS_MS.length) {
-          retryTimer.current = window.setTimeout(() => attempt(index + 1), RETRY_DELAYS_MS[index]);
-          return;
-        }
-        // Neconditionat: succes, esec definitiv sau plafon atins — aplicatia
-        // porneste. Vezi decizia userului de mai sus.
-        setReady(true);
-      });
+      const signal = index === 0 ? undefined : AbortSignal.timeout(RETRY_ATTEMPT_TIMEOUT_MS);
+      void syncWebSession(signal)
+        .then((result) => {
+          if (cancelled.current) return;
+          setStatus(result);
+          if (isTransient(result) && index < RETRY_DELAYS_MS.length) {
+            retryTimer.current = window.setTimeout(() => attempt(index + 1), RETRY_DELAYS_MS[index]);
+            return;
+          }
+          // Neconditionat: succes, esec definitiv sau plafon atins — aplicatia
+          // porneste. Vezi decizia userului de mai sus.
+          setReady(true);
+        })
+        .catch(() => {
+          // Aparare in adancime pentru garantia de montare. `syncWebSession` nu
+          // arunca azi (toate caile intorc o valoare), dar garantia userului nu are
+          // voie sa depinda de un contract pe care o editare viitoare il poate
+          // incalca tacut: fara acest catch, o promisiune respinsa ar sari peste
+          // `setReady` si ar lasa utilizatorul pe ecranul de asteptare la infinit —
+          // exact ce pretinde ca apara testul "GARANTIE".
+          if (cancelled.current) return;
+          setStatus("error");
+          setReady(true);
+        });
     };
 
     if (!started.current) {
