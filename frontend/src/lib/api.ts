@@ -160,6 +160,21 @@ function sessionLooksFresh(): boolean {
 
 // Best-effort: raspunsul poate fi un mock de test fara .json(), sau un envelope
 // fara expiresAt. Orice eroare lasa expirarea necunoscuta, deci re-mint normal.
+// Raspunsul poarta envelope-ul de eroare al aplicatiei? Distinge un refuz DELIBERAT
+// al backendului de unul emis de infrastructura (ingress, poarta de autentificare),
+// care pe acelasi cod de stare inseamna "reincearca", nu "configurare gresita".
+// Best-effort si non-throwing: orice raspuns care nu se poate citi ca JSON valid cu
+// `error.code` e tratat ca venind din infrastructura.
+async function hasAppErrorEnvelope(res: Response): Promise<boolean> {
+  try {
+    if (typeof res.clone !== "function") return false;
+    const body = (await res.clone().json()) as { error?: { code?: unknown } };
+    return typeof body?.error?.code === "string";
+  } catch {
+    return false;
+  }
+}
+
 async function rememberSessionExpiry(res: Response): Promise<void> {
   try {
     if (typeof res.json !== "function") return;
@@ -192,7 +207,15 @@ export async function syncWebSession(signal?: AbortSignal): Promise<SyncSessionR
     return "ok";
   }
   if (res.status === 403) return "not_provisioned"; // not_provisioned / forbidden / account_inactive
-  if (res.status === 400 || res.status === 503) return "unavailable"; // desktop_only / missing_identity / bridge_disabled
+  if (res.status === 400) return "unavailable"; // desktop_only / missing_identity
+  // 503 e ambiguu si contine ambele feluri de esec. `bridge_disabled` vine de la
+  // BACKEND si e definitiv; dar acelasi cod il emit si ingress-ul sau poarta de
+  // autentificare in timpul unui redeploy, si acolo e strict tranzitoriu. Clasificat
+  // orbeste ca definitiv, oprea reincercarile si lasa utilizatorul pe ecranul de
+  // eroare pana la un refresh manual — adica exact incalcarea garantiei ca aplicatia
+  // porneste INTOTDEAUNA. Discriminarea se face pe envelope-ul aplicatiei:
+  // infrastructura raspunde cu HTML sau text, nu cu forma noastra.
+  if (res.status === 503) return (await hasAppErrorEnvelope(res)) ? "unavailable" : "error";
   return "error";
 }
 
