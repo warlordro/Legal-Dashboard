@@ -32,6 +32,13 @@ services:
       OAUTH2_PROXY_COOKIE_SAMESITE: lax
       OAUTH2_PROXY_COOKIE_EXPIRE: 168h
       OAUTH2_PROXY_REVERSE_PROXY: "true"          # trust X-Forwarded-* from Traefik
+      # OBLIGATORIU alaturi de REVERSE_PROXY. Fara el, oauth2-proxy pastreaza
+      # compatibilitatea si are incredere in `X-Forwarded-*` de la ORICE sursa
+      # (0.0.0.0/0), cu doar un avertisment la pornire. Cum lista de rute publice se
+      # potriveste pe PATH, un `X-Forwarded-Uri` venit de la client poate face o ruta
+      # protejata sa treaca drept publica - adica ocolirea autentificarii. Ingress-ul
+      # sterge oricum antetul; asta e al doilea strat.
+      OAUTH2_PROXY_TRUSTED_PROXY_IPS: ${OAUTH2_PROXY_TRUSTED_PROXY_IPS:-172.16.0.0/12}
       OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
       OAUTH2_PROXY_UPSTREAMS: http://backend:3002/
       # Vezi nota din deploy/docker-compose.nas.yml: default-ul de 30s taie

@@ -69,3 +69,25 @@ describe("ruta de confirmare a delogarii e publica in toate stack-urile", () => 
     expect(skipRoutesOf(file)).toContain(REQUIRED);
   });
 });
+
+// Rutele publice sunt sigure DOAR daca path-ul pe care il vede proxy-ul nu poate fi
+// ales de client. `REVERSE_PROXY=true` fara `TRUSTED_PROXY_IPS` inseamna, dupa
+// documentatia upstream, incredere in `X-Forwarded-*` de la ORICE sursa - cu doar un
+// avertisment la pornire. Cum lista de rute publice se compara pe PATH, un
+// `X-Forwarded-Uri` trimis de client poate face o ruta protejata sa treaca drept
+// publica, adica ocolirea autentificarii.
+//
+// Doua straturi, cerute amandoua de advisory-ul upstream: ingress-ul STERGE antetul,
+// iar proxy-ul are incredere doar in reteaua interna.
+describe("path-ul vazut de proxy nu poate fi ales de client", () => {
+  it.each(composeFilesWithAuthProxy())("%s restrange increderea in antetele de rutare", (file) => {
+    expect(fs.readFileSync(file, "utf8")).toMatch(/OAUTH2_PROXY_TRUSTED_PROXY_IPS/);
+  });
+
+  it("ingress-ul Caddy sterge X-Forwarded-Uri", () => {
+    // Caddy transmite implicit antetele primite daca nu exista un `header_up -...`
+    // explicit, iar el e proxy de INCREDERE pentru oauth2-proxy.
+    const caddy = path.join(repoRoot(), "deploy", "Caddyfile");
+    expect(fs.readFileSync(caddy, "utf8")).toMatch(/header_up\s+-X-Forwarded-Uri/);
+  });
+});

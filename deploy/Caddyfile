@@ -26,6 +26,12 @@
 		# pe acelasi canal; cu `-Cookie` activ, login-ul intra in bucla infinita.
 		# Stripuim doar header-ele de identitate spoofabile, pe care DOAR
 		# oauth2-proxy are voie sa le seteze in aval.
+		# `X-Forwarded-Uri` decide ce PATH vede oauth2-proxy cand compara cererea cu
+		# lista de rute publice. Caddy e proxy de INCREDERE pentru el, deci un antet
+		# venit de la client ar fi transmis nemodificat si ar putea face o ruta
+		# protejata sa treaca drept publica - adica ocolirea autentificarii. Caddy
+		# transmite implicit antetele primite; stergerea trebuie ceruta explicit.
+		header_up -X-Forwarded-Uri
 		header_up -Authorization
 		header_up -X-Auth-Request-Email
 		header_up -X-Forwarded-Email
