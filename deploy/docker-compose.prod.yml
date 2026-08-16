@@ -57,6 +57,13 @@ services:
       OAUTH2_PROXY_COOKIE_SAMESITE: lax
       OAUTH2_PROXY_COOKIE_EXPIRE: 168h
       OAUTH2_PROXY_REVERSE_PROXY: "true"
+      # OBLIGATORIU alaturi de REVERSE_PROXY. Fara el, oauth2-proxy pastreaza
+      # compatibilitatea si are incredere in `X-Forwarded-*` de la ORICE sursa
+      # (0.0.0.0/0), cu doar un avertisment la pornire. Cum lista de rute publice se
+      # potriveste pe PATH, un `X-Forwarded-Uri` venit de la client poate face o ruta
+      # protejata sa treaca drept publica - adica ocolirea autentificarii. Ingress-ul
+      # sterge oricum antetul; asta e al doilea strat.
+      OAUTH2_PROXY_TRUSTED_PROXY_IPS: ${OAUTH2_PROXY_TRUSTED_PROXY_IPS:-172.16.0.0/12}
       OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
       OAUTH2_PROXY_UPSTREAMS: http://backend:3002/
       # Vezi nota din deploy/docker-compose.nas.yml: default-ul de 30s taie
@@ -71,7 +78,13 @@ services:
       OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
       OAUTH2_PROXY_SET_AUTHORIZATION_HEADER: "false"
       OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
-      OAUTH2_PROXY_SKIP_AUTH_ROUTES: "GET=^/health$$,GET=^/api/v1/auth/oauth2/sync$$"
+      # `/delogat` TREBUIE sa fie public: e pagina de confirmare pe care aterizezi
+      # DUPA sign_out, cand nu mai ai sesiune. Gate-uita, ar cere autentificare, iar
+      # cu SKIP_PROVIDER_BUTTON Google te re-logheaza instant - butonul de iesire ar
+      # parea ca nu face nimic, fara nicio eroare vizibila.
+      # ATENTIE LA DEPLOY: e variabila de mediu pe ACEST container, deci un redeploy
+      # care reface doar imaginea backend NU o aplica - oauth2-proxy trebuie recreat.
+      OAUTH2_PROXY_SKIP_AUTH_ROUTES: "GET=^/health$$,GET=^/api/v1/auth/oauth2/sync$$,GET=^/delogat$$"
       # Fix 2026-07-02: OAUTH2_PROXY_INJECT_REQUEST_HEADERS nu exista ca flag in
       # oauth2-proxy v7.7.1 (confirmat din --help: absent). Nu a functionat
       # niciodata. Mecanismul real, standard, e pass-basic-auth (default true) +

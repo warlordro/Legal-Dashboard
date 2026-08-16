@@ -148,6 +148,7 @@ describe("ownerContext auth seam", () => {
       code: "unauthorized",
       status: 401,
       isPatShaped: false, // fara Authorization: Bearer ld_pat_* -> esec JWT/cookie, nu PAT
+      tokenPresent: false, // cererea nu poarta nici Authorization, nici cookie de sesiune
     });
   });
 
@@ -185,6 +186,112 @@ describe("ownerContext auth seam", () => {
     expect(res.status).toBe(401);
     const events = getAuditEvents({ ownerId: null, action: "auth.denied" });
     expect(JSON.parse(events[0].detail_json).isPatShaped).toBe(true);
+  });
+
+  // 2026-08-16: refuzul "fara credential" si cel "cu credential invalid" emiteau
+  // AMANDOUA `code: "unauthorized"`, iar detaliul nu pastra diferenta. Consecinta
+  // traita: un incident real (rafala de auth.denied pe deploy-ul web) nu a putut
+  // fi lamurit din audit. Consecinta de securitate: o incercare sistematica de
+  // acces neautorizat, care vine mereu fara credential, arata IDENTIC cu o
+  // reincarcare de pagina esuata a unui utilizator legitim.
+  it("marks tokenPresent=false when the request carried NO credential at all", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    process.env.LEGAL_DASHBOARD_JWT_SECRET = SECRET;
+    const app = buildApp();
+
+    const res = await app.request("/api/whoami");
+
+    expect(res.status).toBe(401);
+    const events = getAuditEvents({ ownerId: null, action: "auth.denied" });
+    expect(JSON.parse(events[0].detail_json).tokenPresent).toBe(false);
+  });
+
+  it("marks tokenPresent=true for an invalid Bearer, distinguishing it from a missing one", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    process.env.LEGAL_DASHBOARD_JWT_SECRET = SECRET;
+    const app = buildApp();
+
+    const res = await app.request("/api/whoami", {
+      headers: { authorization: "Bearer not-a-valid-jwt" },
+    });
+
+    expect(res.status).toBe(401);
+    const detail = JSON.parse(getAuditEvents({ ownerId: null, action: "auth.denied" })[0].detail_json);
+    expect(detail.tokenPresent).toBe(true);
+    // Ortogonal fata de isPatShaped: un Bearer obisnuit e prezent, dar nu e PAT.
+    expect(detail.isPatShaped).toBe(false);
+  });
+
+  it("marks tokenPresent=true when only an invalid session cookie is presented", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    process.env.LEGAL_DASHBOARD_JWT_SECRET = SECRET;
+    const app = buildApp();
+
+    const res = await app.request("/api/whoami", {
+      headers: { cookie: "legal_dashboard_session=garbage" },
+    });
+
+    expect(res.status).toBe(401);
+    expect(JSON.parse(getAuditEvents({ ownerId: null, action: "auth.denied" })[0].detail_json).tokenPresent).toBe(true);
+  });
+
+  // Cookie-ul e intrare externa, deci cazurile ostile se scriu INAINTEA celui
+  // normal. Prima implementare cauta substring-ul `legal_dashboard_session=` in
+  // headerul brut si gresea in AMBELE sensuri; helperul trebuie sa oglindeasca
+  // parserul real (split pe `;`, primul `=`, nume trim-uit, egalitate exacta).
+  it.each([
+    ["x_legal_dashboard_session=abc", false, "nume cu prefix strain nu e cookie-ul aplicatiei"],
+    ["other=legal_dashboard_session=abc", false, "sirul apare in VALOAREA altui cookie"],
+    ["legal_dashboard_session_extra=abc", false, "nume cu sufix strain"],
+    ["legal_dashboard_session = garbage", true, "parserul trim-uieste numele, deci sesiunea E vazuta"],
+    ["  legal_dashboard_session=x", true, "spatiu la inceputul perechii"],
+    ["a=1; legal_dashboard_session=x; b=2", true, "cookie legitim printre altele"],
+    // Forma REALISTA a incidentului din productie: cookie-ul proxy-ului ajunge la
+    // backend, cel de sesiune al aplicatiei lipseste. Trebuie sa iasa "fara
+    // credential", altfel exact cazul pe care campul exista sa-l izoleze e clasat gresit.
+    ["_oauth2_proxy=xyz", false, "doar cookie-ul proxy-ului, fara sesiune de aplicatie"],
+    ["fara-egal", false, "pereche fara `=` nu trebuie sa arunce"],
+    ["", false, "header gol"],
+  ])("cookie %j -> tokenPresent=%s (%s)", async (cookie, expected) => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    process.env.LEGAL_DASHBOARD_JWT_SECRET = SECRET;
+    const app = buildApp();
+
+    const res = await app.request("/api/whoami", { headers: cookie ? { cookie } : {} });
+
+    expect(res.status).toBe(401);
+    expect(JSON.parse(getAuditEvents({ ownerId: null, action: "auth.denied" })[0].detail_json).tokenPresent).toBe(
+      expected
+    );
+  });
+
+  // Proxy-ul de autentificare injecteaza el insusi un `Authorization: Basic ...` catre
+  // backend. Numarat drept credential al clientului, campul iese `true` pe ORICE cerere
+  // care a trecut de poarta Google - adica exact pe cazul care l-a motivat.
+  it("NU numara Authorization: Basic injectat de proxy drept credential al clientului", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    process.env.LEGAL_DASHBOARD_JWT_SECRET = SECRET;
+    const app = buildApp();
+
+    const basic = `Basic ${Buffer.from("proxy:secret").toString("base64")}`;
+    const res = await app.request("/api/whoami", { headers: { authorization: basic } });
+
+    expect(res.status).toBe(401);
+    expect(JSON.parse(getAuditEvents({ ownerId: null, action: "auth.denied" })[0].detail_json).tokenPresent).toBe(
+      false
+    );
+  });
+
+  it("dar numara in continuare un Bearer prezentat de client", async () => {
+    // Contraexemplul care trebuie sa pice: un fix care ignora tot `Authorization`.
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    process.env.LEGAL_DASHBOARD_JWT_SECRET = SECRET;
+    const app = buildApp();
+
+    const res = await app.request("/api/whoami", { headers: { authorization: "Bearer ceva-invalid" } });
+
+    expect(res.status).toBe(401);
+    expect(JSON.parse(getAuditEvents({ ownerId: null, action: "auth.denied" })[0].detail_json).tokenPresent).toBe(true);
   });
 
   it("still returns auth errors when auth.denied audit persistence fails", async () => {

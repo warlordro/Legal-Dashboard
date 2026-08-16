@@ -91,10 +91,11 @@ let logoutInProgress = false;
 export async function beginLogout(): Promise<void> {
   logoutInProgress = true;
   sessionExpiresAtMs = null;
-  if (reSyncInFlight) {
-    // Esecul sync-ului e irelevant aici: conteaza doar sa nu mai fie in zbor.
-    await reSyncInFlight.catch(() => undefined);
-  }
+  // Asteapta si sync-ul dedupat, si pe cele pornite direct (bootstrap). Esecul lor e
+  // irelevant aici: conteaza doar sa nu mai fie in zbor cand se sterge cookie-ul.
+  const pending: Promise<unknown>[] = [...directSyncsInFlight];
+  if (reSyncInFlight) pending.push(reSyncInFlight);
+  await Promise.all(pending.map((x) => x.catch(() => undefined)));
 }
 
 // Doar pentru teste: starea e per-modul si altfel ar contamina cazurile urmatoare.
@@ -160,6 +161,21 @@ function sessionLooksFresh(): boolean {
 
 // Best-effort: raspunsul poate fi un mock de test fara .json(), sau un envelope
 // fara expiresAt. Orice eroare lasa expirarea necunoscuta, deci re-mint normal.
+// Raspunsul poarta envelope-ul de eroare al aplicatiei? Distinge un refuz DELIBERAT
+// al backendului de unul emis de infrastructura (ingress, poarta de autentificare),
+// care pe acelasi cod de stare inseamna "reincearca", nu "configurare gresita".
+// Best-effort si non-throwing: orice raspuns care nu se poate citi ca JSON valid cu
+// `error.code` e tratat ca venind din infrastructura.
+async function hasAppErrorEnvelope(res: Response): Promise<boolean> {
+  try {
+    if (typeof res.clone !== "function") return false;
+    const body = (await res.clone().json()) as { error?: { code?: unknown } };
+    return typeof body?.error?.code === "string";
+  } catch {
+    return false;
+  }
+}
+
 async function rememberSessionExpiry(res: Response): Promise<void> {
   try {
     if (typeof res.json !== "function") return;
@@ -179,21 +195,48 @@ async function rememberSessionExpiry(res: Response): Promise<void> {
 // recovery above. Best-effort: never throws. /auth/refresh only rotates an
 // already-valid cookie, so it cannot bootstrap — the bridge always can, as long
 // as the oauth2-proxy Google session is alive (~7 days).
+// Sync-urile in zbor pornite DIRECT de aici (bootstrap-ul le cheama asa, ocolind
+// `ensureWebSession`). `beginLogout` le asteapta: unul aterizat dupa stergerea
+// cookie-ului ar reinvia sesiunea.
+const directSyncsInFlight = new Set<Promise<SyncSessionResult>>();
+
 export async function syncWebSession(signal?: AbortSignal): Promise<SyncSessionResult> {
-  let res: Response;
-  try {
-    res = await apiFetch(SYNC_PATH, { method: "POST", signal: signal ?? AbortSignal.timeout(10_000) });
-  } catch (err) {
-    console.warn("[syncWebSession] bridge sync failed:", err);
+  // Gardul sta AICI, nu doar in `ensureWebSession`, pentru ca bootstrap-ul cheama
+  // direct functia asta - deci nu vedea gardul de delogare si nu era asteptat de
+  // `beginLogout`. O fila secundara aflata in pornire in timp ce alta face delogare
+  // minteste o sesiune PROASPATA, deci nerevocata, chiar inainte ca iesirea sa stearga
+  // cookie-ul portii.
+  if (logoutInProgress) return "error";
+  const run = (async (): Promise<SyncSessionResult> => {
+    let res: Response;
+    try {
+      res = await apiFetch(SYNC_PATH, { method: "POST", signal: signal ?? AbortSignal.timeout(10_000) });
+    } catch (err) {
+      console.warn("[syncWebSession] bridge sync failed:", err);
+      return "error";
+    }
+    if (res.ok) {
+      await rememberSessionExpiry(res);
+      return "ok";
+    }
+    if (res.status === 403) return "not_provisioned"; // not_provisioned / forbidden / account_inactive
+    if (res.status === 400) return "unavailable"; // desktop_only / missing_identity
+    // 503 e ambiguu si contine ambele feluri de esec. `bridge_disabled` vine de la
+    // BACKEND si e definitiv; dar acelasi cod il emit si ingress-ul sau poarta de
+    // autentificare in timpul unui redeploy, si acolo e strict tranzitoriu. Clasificat
+    // orbeste ca definitiv, oprea reincercarile si lasa utilizatorul pe ecranul de
+    // eroare pana la un refresh manual — adica exact incalcarea garantiei ca aplicatia
+    // porneste INTOTDEAUNA. Discriminarea se face pe envelope-ul aplicatiei:
+    // infrastructura raspunde cu HTML sau text, nu cu forma noastra.
+    if (res.status === 503) return (await hasAppErrorEnvelope(res)) ? "unavailable" : "error";
     return "error";
+  })();
+  directSyncsInFlight.add(run);
+  try {
+    return await run;
+  } finally {
+    directSyncsInFlight.delete(run);
   }
-  if (res.ok) {
-    await rememberSessionExpiry(res);
-    return "ok";
-  }
-  if (res.status === 403) return "not_provisioned"; // not_provisioned / forbidden / account_inactive
-  if (res.status === 400 || res.status === 503) return "unavailable"; // desktop_only / missing_identity / bridge_disabled
-  return "error";
 }
 
 // Dedupe concurrent re-mints: a burst of 401s, the keep-alive timer, and a

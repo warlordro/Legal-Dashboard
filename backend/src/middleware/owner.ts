@@ -1,5 +1,11 @@
 import type { Context, Next } from "hono";
-import { AuthenticationError, getAuthProvider, type AuthenticatedContext } from "../auth/authProvider.ts";
+import { getCookie } from "hono/cookie";
+import {
+  AUTH_COOKIE_NAME,
+  AuthenticationError,
+  getAuthProvider,
+  type AuthenticatedContext,
+} from "../auth/authProvider.ts";
 import { recordAudit } from "../db/auditRepository.ts";
 import { getAuthMode } from "../auth/config.ts";
 import { fail } from "../util/envelope.ts";
@@ -12,6 +18,41 @@ import { TOKEN_PREFIX } from "../db/apiTokenRepository.ts";
 function isPatShapedBearer(c: Context): boolean {
   const m = /^Bearer\s+(.+)$/i.exec((c.req.header("authorization") ?? "").trim());
   return (m?.[1] ?? "").startsWith(TOKEN_PREFIX);
+}
+
+// A prezentat clientul VREUN credential al aplicatiei, oricare?
+//
+// Fara campul asta, "cerere fara credential" si "credential invalid" produc
+// amandoua `code: "unauthorized"` in audit, deci arata identic. Campul e un
+// semnal de TRIAJ, nu o clasificare cauzala: NU separa atacatorii de
+// utilizatorii legitimi (credential stuffing vine cu credential, iar un
+// utilizator cu cookie expirat vine fara). Separa strict "a venit cu ceva" de
+// "a venit fara nimic" — distinctia care lipsea cand un incident real nu a putut
+// fi lamurit din audit.
+//
+// Deliberat NU refoloseste `readRequestToken` din authProvider: aceasta ruleaza
+// pe calea de EROARE si nu are voie sa arunce. Selectia de credentiale din
+// authProvider e pe cale sa devina fail-closed (poate arunca pe conflict intre
+// surse), iar un throw de acolo ar inghiti chiar randul de audit. Helperul de
+// aici e pur: doar prezenta, niciodata valoarea, si nicio validare.
+//
+// Cookie-ul se citeste cu parserul lui Hono, nu prin cautare de substring in
+// headerul brut: acela dadea si fals pozitiv (`x_legal_dashboard_session=`, sau
+// literalul aparut in VALOAREA altui cookie) si fals negativ (`nume = valoare`,
+// pe care parserul real il accepta pentru ca trim-uieste numele). `getCookie` e
+// non-throwing: split pe `;`, comparatie EXACTA de nume, decodare catch-safe.
+//
+// Ortogonal fata de `isPatShaped`: acela raspunde "ce FEL de credential",
+// acesta raspunde "a fost vreunul".
+function hasPresentedAppCredential(c: Context): boolean {
+  // DOAR schema Bearer. In modul web, proxy-ul de autentificare injecteaza el insusi
+  // un `Authorization: Basic ...` catre backend, ca sa-si dovedeasca provenienta
+  // (`OAUTH2_PROXY_PASS_BASIC_AUTH` in toate cele trei compose-uri). Numarat drept
+  // credential al clientului, ar face campul `true` pe ORICE cerere care a trecut de
+  // poarta Google — adica exact pe cazul care a motivat introducerea lui, si semnalul
+  // de triaj ar fi mereu pozitiv, deci inutil.
+  if (/^Bearer\s+\S/i.test((c.req.header("authorization") ?? "").trim())) return true;
+  return getCookie(c, AUTH_COOKIE_NAME) !== undefined;
 }
 
 // Type-augment Hono so c.get("ownerId") is typed string instead of unknown.
@@ -77,6 +118,13 @@ function writeAuthError(c: Context, err: AuthenticationError): Response {
         // audit (fix): separa replay-urile de PAT revocat/expirat de esecurile JWT in log,
         // fara lookup DB pe calea de esec (anti-enumerare/timing). true = Bearer ld_pat_*.
         isPatShaped: isPatShapedBearer(c),
+        // "A venit fara nimic" vs "a venit cu ceva invalid". Doar prezenta, niciodata
+        // valoarea. Exista DOAR pe refuzurile de autentificare (aici), NU si pe cele de
+        // autorizare din requireRole — acolo utilizatorul e deja autentificat, deci
+        // campul ar fi mereu `true` si zero informatie. Cele doua familii raman
+        // separabile in audit prin forma detaliului si prin owner_id (null aici, real
+        // acolo); vezi pin-ul din requireRole.test.ts.
+        tokenPresent: hasPresentedAppCredential(c),
       },
     });
   } catch (auditErr) {

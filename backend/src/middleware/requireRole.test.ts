@@ -136,6 +136,12 @@ describe("requireRole — audit trail on denial", () => {
     expect(detail.reason).toBe("role_mismatch");
     expect(detail.role).toBe("user");
     expect(detail.required).toEqual(["admin"]);
+    // PIN deliberat: `tokenPresent` apartine EXCLUSIV refuzurilor de autentificare
+    // (ownerContext). Aici utilizatorul e deja autentificat, deci campul ar fi mereu
+    // `true` si zero informatie — iar prezenta lui ar sugera fals ca o interogare de
+    // audit filtrata pe el acopera si refuzurile de autorizare. Daca cineva il adauga
+    // "pentru consistenta", acest test trebuie sa-l opreasca.
+    expect(detail.tokenPresent).toBeUndefined();
   });
 
   it("records auth.denied audit event when user is inactive", async () => {
