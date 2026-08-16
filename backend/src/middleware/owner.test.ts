@@ -235,6 +235,36 @@ describe("ownerContext auth seam", () => {
     expect(JSON.parse(getAuditEvents({ ownerId: null, action: "auth.denied" })[0].detail_json).tokenPresent).toBe(true);
   });
 
+  // Cookie-ul e intrare externa, deci cazurile ostile se scriu INAINTEA celui
+  // normal. Prima implementare cauta substring-ul `legal_dashboard_session=` in
+  // headerul brut si gresea in AMBELE sensuri; helperul trebuie sa oglindeasca
+  // parserul real (split pe `;`, primul `=`, nume trim-uit, egalitate exacta).
+  it.each([
+    ["x_legal_dashboard_session=abc", false, "nume cu prefix strain nu e cookie-ul aplicatiei"],
+    ["other=legal_dashboard_session=abc", false, "sirul apare in VALOAREA altui cookie"],
+    ["legal_dashboard_session_extra=abc", false, "nume cu sufix strain"],
+    ["legal_dashboard_session = garbage", true, "parserul trim-uieste numele, deci sesiunea E vazuta"],
+    ["  legal_dashboard_session=x", true, "spatiu la inceputul perechii"],
+    ["a=1; legal_dashboard_session=x; b=2", true, "cookie legitim printre altele"],
+    // Forma REALISTA a incidentului din productie: cookie-ul proxy-ului ajunge la
+    // backend, cel de sesiune al aplicatiei lipseste. Trebuie sa iasa "fara
+    // credential", altfel exact cazul pe care campul exista sa-l izoleze e clasat gresit.
+    ["_oauth2_proxy=xyz", false, "doar cookie-ul proxy-ului, fara sesiune de aplicatie"],
+    ["fara-egal", false, "pereche fara `=` nu trebuie sa arunce"],
+    ["", false, "header gol"],
+  ])("cookie %j -> tokenPresent=%s (%s)", async (cookie, expected) => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    process.env.LEGAL_DASHBOARD_JWT_SECRET = SECRET;
+    const app = buildApp();
+
+    const res = await app.request("/api/whoami", { headers: cookie ? { cookie } : {} });
+
+    expect(res.status).toBe(401);
+    expect(JSON.parse(getAuditEvents({ ownerId: null, action: "auth.denied" })[0].detail_json).tokenPresent).toBe(
+      expected
+    );
+  });
+
   it("still returns auth errors when auth.denied audit persistence fails", async () => {
     process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
     process.env.LEGAL_DASHBOARD_JWT_SECRET = SECRET;
