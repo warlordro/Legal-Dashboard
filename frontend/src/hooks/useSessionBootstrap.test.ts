@@ -59,10 +59,12 @@ function renderHook() {
 beforeEach(() => {
   mockSync.mockReset();
   setDesktop(false);
+  vi.useFakeTimers();
 });
 
 afterEach(() => {
   setDesktop(false);
+  vi.useRealTimers();
 });
 
 describe("useSessionBootstrap", () => {
@@ -99,6 +101,12 @@ describe("useSessionBootstrap", () => {
     mockSync.mockResolvedValue("error");
     const h = renderHook();
     await h.flush();
+    // Din 2026-08-16 un esec tranzitoriu se reincearca de cateva ori inainte de
+    // montare. Garantia aparata de acest test ramane NESLABITA: dupa epuizarea
+    // reincercarilor aplicatia porneste oricum, nu atarna.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
+    });
     expect(h.capture.current?.ready).toBe(true);
     expect(h.capture.current?.status).toBe("error");
     h.unmount();
@@ -130,5 +138,93 @@ describe("useSessionBootstrap", () => {
 
     act(() => root?.unmount());
     container.remove();
+  });
+});
+
+// 2026-08-16: cand pregatirea sesiunii esueaza (blip de retea, bridge picat sau
+// inca nepornit dupa un redeploy), aplicatia se monteaza oricum si TOATE cererile
+// de la pornire iau 401. Fiecare se repara singura, deci utilizatorul nu vede
+// nimic - dar auditul primeste o rafala, iar `auth.denied` e clasificat "critical"
+// in tabloul de bord, deci pornirile nereusite arata acolo ca incidente de
+// securitate si dilueaza semnalul real.
+//
+// DECIZIE A USERULUI: aplicatia trebuie sa porneasca INTOTDEAUNA. Varianta care
+// refuza montarea pana la succes a fost respinsa explicit - disponibilitatea bate
+// curatenia jurnalului. De aceea reincercarile sunt MARGINITE si montarea e
+// garantata dupa plafon.
+describe("useSessionBootstrap — reincercari marginite", () => {
+  it("reincearca la esec si se monteaza dupa succes, fara sa mai fie nevoie de reparatii", async () => {
+    mockSync.mockResolvedValueOnce("error").mockResolvedValueOnce("error").mockResolvedValueOnce("ok");
+    const h = renderHook();
+
+    await h.flush();
+    expect(h.capture.current?.ready).toBe(false);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(mockSync).toHaveBeenCalledTimes(3);
+    expect(h.capture.current?.ready).toBe(true);
+    expect(h.capture.current?.status).toBe("ok");
+    h.unmount();
+  });
+
+  it("GARANTIE: dupa epuizarea reincercarilor aplicatia SE MONTEAZA oricum", async () => {
+    // Testul care apara decizia userului. Contraexemplul care trebuie sa pice: o
+    // implementare care reincearca la nesfarsit si lasa utilizatorul blocat in
+    // ecranul de asteptare.
+    mockSync.mockResolvedValue("error");
+    const h = renderHook();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30000);
+    });
+
+    expect(h.capture.current?.ready).toBe(true);
+    expect(h.capture.current?.status).toBe("error");
+    h.unmount();
+  });
+
+  it("nu reincearca pe un esec DEFINITIV de cont (not_provisioned)", async () => {
+    // Reincercarea are sens doar pe esecuri tranzitorii. Un cont neprovizionat sau
+    // inactiv da acelasi raspuns oricat s-ar reincerca, iar utilizatorul ar astepta
+    // degeaba inainte sa vada mesajul care ii explica situatia.
+    mockSync.mockResolvedValue("not_provisioned");
+    const h = renderHook();
+
+    await h.flush();
+
+    expect(mockSync).toHaveBeenCalledTimes(1);
+    expect(h.capture.current?.ready).toBe(true);
+    expect(h.capture.current?.status).toBe("not_provisioned");
+    h.unmount();
+  });
+
+  it("desktop: zero reincercari, zero apeluri", async () => {
+    setDesktop(true);
+    const h = renderHook();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30000);
+    });
+
+    expect(mockSync).not.toHaveBeenCalled();
+    expect(h.capture.current?.ready).toBe(true);
+    h.unmount();
+  });
+
+  it("unmount in timpul reincercarilor nu mai actualizeaza starea", async () => {
+    mockSync.mockResolvedValue("error");
+    const h = renderHook();
+    await h.flush();
+    const callsAtUnmount = mockSync.mock.calls.length;
+    h.unmount();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30000);
+    });
+
+    expect(mockSync.mock.calls.length).toBe(callsAtUnmount);
   });
 });

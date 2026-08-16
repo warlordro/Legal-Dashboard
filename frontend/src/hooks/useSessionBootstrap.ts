@@ -21,6 +21,30 @@ function isDesktopRuntime(): boolean {
   return typeof window !== "undefined" && window.desktopApi !== undefined;
 }
 
+// Reincercari marginite pe esecul TRANZITORIU al handshake-ului.
+//
+// Cand sync-ul esueaza (blip de retea, bridge picat sau inca nepornit dupa un
+// redeploy), shell-ul se monteaza oricum si toate cererile de la pornire iau 401.
+// Fiecare se repara singura prin interceptor, deci utilizatorul nu vede nimic —
+// dar auditul primeste o rafala, iar `auth.denied` e clasificat "critical" in
+// timeline-ul de dashboard, deci fiecare pornire nereusita pune randuri rosii
+// false in fata adminului si dilueaza semnalul real de securitate.
+//
+// DECIZIE A USERULUI (2026-08-16), fixata de testul "GARANTIE": aplicatia trebuie
+// sa porneasca INTOTDEAUNA. Varianta care refuza montarea pana la succes a fost
+// respinsa explicit — un ecran de asteptare la fiecare intrerupere de retea e mai
+// rau decat cateva randuri in jurnal. De aceea plafonul e mic si montarea e
+// neconditionata dupa epuizarea lui.
+const RETRY_DELAYS_MS = [1000, 2000] as const;
+
+// Doar esecurile tranzitorii se reincearca. `not_provisioned` (cont inexistent
+// sau inactiv) si `unavailable` (configurare de server invalida) dau acelasi
+// raspuns oricat s-ar reincerca, iar utilizatorul ar astepta degeaba inainte sa
+// vada mesajul care ii explica situatia.
+function isTransient(result: SyncSessionResult): boolean {
+  return result === "error";
+}
+
 export function useSessionBootstrap(): SessionBootstrap {
   // Desktop-ness is a mount-time invariant (the Electron preload injects
   // window.desktopApi before the bundle runs); capture it once so a late
@@ -30,12 +54,42 @@ export function useSessionBootstrap(): SessionBootstrap {
   const [status, setStatus] = useState<SyncSessionResult>("ok");
   const started = useRef(false);
 
+  // `cancelled` traieste intr-un ref, nu intr-o variabila locala de efect, si se
+  // RE-ARMEAZA la fiecare montare. Sub StrictMode, React invoca efectul de doua
+  // ori: prima rulare porneste handshake-ul, cleanup-ul ei l-ar anula, iar a doua
+  // nu il reporneste (gardul `started`) — cu o variabila locala, promisiunea in
+  // zbor ar ateriza "anulata" si aplicatia nu ar porni NICIODATA in dev. Prins de
+  // testul de StrictMode existent.
+  const cancelled = useRef(false);
+  const retryTimer = useRef<number | undefined>(undefined);
+
   useEffect(() => {
-    if (desktop || started.current) return;
-    started.current = true;
-    syncWebSession()
-      .then(setStatus)
-      .finally(() => setReady(true));
+    if (desktop) return;
+    cancelled.current = false;
+
+    const attempt = (index: number): void => {
+      void syncWebSession().then((result) => {
+        if (cancelled.current) return;
+        setStatus(result);
+        if (isTransient(result) && index < RETRY_DELAYS_MS.length) {
+          retryTimer.current = window.setTimeout(() => attempt(index + 1), RETRY_DELAYS_MS[index]);
+          return;
+        }
+        // Neconditionat: succes, esec definitiv sau plafon atins — aplicatia
+        // porneste. Vezi decizia userului de mai sus.
+        setReady(true);
+      });
+    };
+
+    if (!started.current) {
+      started.current = true;
+      attempt(0);
+    }
+
+    return () => {
+      cancelled.current = true;
+      if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
+    };
   }, [desktop]);
 
   return { ready, status };
