@@ -37,12 +37,18 @@ function composeFilesWithAuthProxy(): string[] {
   return found;
 }
 
+// Cauta ASIGNAREA, nu prima linie care CONTINE numele. Un comentariu care mentioneaza
+// setarea (documentatie, nota de schimbare) era luat drept valoare, si testul pica desi
+// configuratia era corecta. O alarma falsa e la fel de daunatoare ca un verde fals:
+// duce la slabirea asertiei. Demonstrat prin mutatie inainte de corectie — un comentariu
+// inserat deasupra setarii facea testul rosu.
 function skipRoutesOf(file: string): string[] {
   const line = fs
     .readFileSync(file, "utf8")
     .split(/\r?\n/)
-    .find((l) => l.includes("OAUTH2_PROXY_SKIP_AUTH_ROUTES"));
-  const value = /:\s*"(.*)"\s*$/.exec((line ?? "").trim())?.[1] ?? "";
+    .map((l) => l.trim())
+    .find((l) => !l.startsWith("#") && /^OAUTH2_PROXY_SKIP_AUTH_ROUTES\s*:/.test(l));
+  const value = /:\s*"(.*)"\s*$/.exec(line ?? "")?.[1] ?? "";
   // In compose, `$` se scrie `$$` (escape de interpolare).
   return value.split(",").map((entry) => entry.replace(/\$\$/g, "$"));
 }
