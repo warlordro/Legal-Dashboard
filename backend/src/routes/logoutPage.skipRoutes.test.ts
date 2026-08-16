@@ -19,14 +19,19 @@ function repoRoot(): string {
   return path.resolve(__dirname, "..", "..", "..");
 }
 
-function composeFilesWithSkipRoutes(): string[] {
+// Descoperirea foloseste un criteriu INDEPENDENT de setarea testata: fisierele care
+// definesc serviciul de autentificare. O versiune anterioara filtra chiar dupa
+// `OAUTH2_PROXY_SKIP_AUTH_ROUTES`, deci stergerea completa a setarii scotea fisierul
+// din lista si testul trecea verde — exact regresia pe care trebuia sa o prinda.
+// (Demonstrat prin mutatie inainte de corectie.)
+function composeFilesWithAuthProxy(): string[] {
   const roots = [repoRoot(), path.join(repoRoot(), "deploy")];
   const found: string[] = [];
   for (const dir of roots) {
     for (const name of fs.readdirSync(dir)) {
       if (!/^docker-compose.*\.ya?ml$/.test(name)) continue;
       const full = path.join(dir, name);
-      if (fs.readFileSync(full, "utf8").includes("OAUTH2_PROXY_SKIP_AUTH_ROUTES")) found.push(full);
+      if (/^\s{2}oauth2-proxy:/m.test(fs.readFileSync(full, "utf8"))) found.push(full);
     }
   }
   return found;
@@ -43,12 +48,18 @@ function skipRoutesOf(file: string): string[] {
 }
 
 describe("ruta de confirmare a delogarii e publica in toate stack-urile", () => {
-  it("gaseste cel putin un compose cu lista de rute publice", () => {
+  it("gaseste toate stack-urile cu proxy de autentificare", () => {
     // Fara asta, testul ar trece vacuu daca fisierele s-ar redenumi.
-    expect(composeFilesWithSkipRoutes().length).toBeGreaterThan(0);
+    expect(composeFilesWithAuthProxy().length).toBeGreaterThan(0);
   });
 
-  it.each(composeFilesWithSkipRoutes())("%s excepteaza /delogat", (file) => {
+  it.each(composeFilesWithAuthProxy())("%s chiar DEFINESTE lista de rute publice", (file) => {
+    // Separat de verificarea continutului: stergerea completa a setarii trebuie sa
+    // pice aici, nu sa scoata tacut fisierul din acoperire.
+    expect(fs.readFileSync(file, "utf8")).toMatch(/OAUTH2_PROXY_SKIP_AUTH_ROUTES/);
+  });
+
+  it.each(composeFilesWithAuthProxy())("%s excepteaza /delogat", (file) => {
     expect(skipRoutesOf(file)).toContain(REQUIRED);
   });
 });
