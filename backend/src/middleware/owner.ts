@@ -45,7 +45,13 @@ function isPatShapedBearer(c: Context): boolean {
 // Ortogonal fata de `isPatShaped`: acela raspunde "ce FEL de credential",
 // acesta raspunde "a fost vreunul".
 function hasPresentedAppCredential(c: Context): boolean {
-  if ((c.req.header("authorization") ?? "").trim() !== "") return true;
+  // DOAR schema Bearer. In modul web, proxy-ul de autentificare injecteaza el insusi
+  // un `Authorization: Basic ...` catre backend, ca sa-si dovedeasca provenienta
+  // (`OAUTH2_PROXY_PASS_BASIC_AUTH` in toate cele trei compose-uri). Numarat drept
+  // credential al clientului, ar face campul `true` pe ORICE cerere care a trecut de
+  // poarta Google — adica exact pe cazul care a motivat introducerea lui, si semnalul
+  // de triaj ar fi mereu pozitiv, deci inutil.
+  if (/^Bearer\s+\S/i.test((c.req.header("authorization") ?? "").trim())) return true;
   return getCookie(c, AUTH_COOKIE_NAME) !== undefined;
 }
 

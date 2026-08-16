@@ -265,6 +265,35 @@ describe("ownerContext auth seam", () => {
     );
   });
 
+  // Proxy-ul de autentificare injecteaza el insusi un `Authorization: Basic ...` catre
+  // backend. Numarat drept credential al clientului, campul iese `true` pe ORICE cerere
+  // care a trecut de poarta Google - adica exact pe cazul care l-a motivat.
+  it("NU numara Authorization: Basic injectat de proxy drept credential al clientului", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    process.env.LEGAL_DASHBOARD_JWT_SECRET = SECRET;
+    const app = buildApp();
+
+    const basic = `Basic ${Buffer.from("proxy:secret").toString("base64")}`;
+    const res = await app.request("/api/whoami", { headers: { authorization: basic } });
+
+    expect(res.status).toBe(401);
+    expect(JSON.parse(getAuditEvents({ ownerId: null, action: "auth.denied" })[0].detail_json).tokenPresent).toBe(
+      false
+    );
+  });
+
+  it("dar numara in continuare un Bearer prezentat de client", async () => {
+    // Contraexemplul care trebuie sa pice: un fix care ignora tot `Authorization`.
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    process.env.LEGAL_DASHBOARD_JWT_SECRET = SECRET;
+    const app = buildApp();
+
+    const res = await app.request("/api/whoami", { headers: { authorization: "Bearer ceva-invalid" } });
+
+    expect(res.status).toBe(401);
+    expect(JSON.parse(getAuditEvents({ ownerId: null, action: "auth.denied" })[0].detail_json).tokenPresent).toBe(true);
+  });
+
   it("still returns auth errors when auth.denied audit persistence fails", async () => {
     process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
     process.env.LEGAL_DASHBOARD_JWT_SECRET = SECRET;
