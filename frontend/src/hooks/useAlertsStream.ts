@@ -138,6 +138,14 @@ export function useAlertsStream(): UseAlertsStreamResult {
     // "proaspat". Fara fortare, apelul devine no-op si stream-ul reintra la
     // nesfarsit in acelasi refuz.
     //
+    // LIMITA cunoscuta (review 2026-08-16): `force: false` nu garanteaza absenta
+    // unui POST de sync. Daca prospetimea ramane NECUNOSCUTA — sync reusit din
+    // care `expiresAt` n-a putut fi citit — apelul nefortat emite oricum cerere,
+    // iar un ciclu `open` urmat imediat de eroare reseteaza backoff-ul la 1s si
+    // poate repeta. Cu backend-ul actual scenariul nu se produce (`expiresAt` e
+    // trimis mereu pe sync reusit), deci nu adaugam un cooldown separat aici; daca
+    // acel camp devine vreodata optional, cazul trebuie retratat.
+    //
     // Conectam DOAR pe rezultat "ok": inainte, `.finally()` deschidea stream-ul
     // si dupa un re-mint esuat, ceea ce garanta inca un 401. Pe orice alt
     // rezultat reprogramam — backoff-ul existent tine ritmul, iar ciclul nu se

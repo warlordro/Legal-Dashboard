@@ -200,5 +200,89 @@ describe("useAlertsStream — recuperare din sesiune invalida", () => {
     });
 
     expect(calls.filter((c) => c.startsWith("ensureWebSession"))).toEqual(["ensureWebSession", "ensureWebSession"]);
+    // Nu doar ca s-a cerut sesiunea: reconectarea chiar a avut loc. Fara asertia
+    // asta, o implementare care cere sesiunea corect si apoi nu mai conecteaza
+    // nimic ar trece verde.
+    expect(FakeEventSource.instances.length).toBe(2);
+  });
+
+  // Contractul e "orice rezultat diferit de ok reprogrameaza", nu "eroarea
+  // reprogrameaza". O implementare care trateaza doar "error" ar lasa un cont
+  // neprovizionat sau un bridge indisponibil cu stream-ul mort.
+  it.each(["error", "unavailable", "not_provisioned"] as const)(
+    "rezultatul %s nu conecteaza, dar reprogrameaza",
+    async (bad) => {
+      vi.useFakeTimers();
+      resultOf([bad, "ok"]);
+      await renderHook();
+
+      expect(FakeEventSource.instances.length).toBe(0);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1500);
+      });
+      expect(FakeEventSource.instances.length).toBe(1);
+    }
+  );
+
+  it("o promisiune RESPINSA nu omoara stream-ul (un listener de sesiune poate arunca)", async () => {
+    vi.useFakeTimers();
+    let attempt = 0;
+    ensureWebSession.mockImplementation(async () => {
+      calls.push("ensureWebSession");
+      attempt += 1;
+      if (attempt <= 2) throw new Error("listener a aruncat");
+      return "ok";
+    });
+    await renderHook();
+
+    expect(FakeEventSource.instances.length).toBe(0);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(ensureWebSession).toHaveBeenCalledTimes(3);
+    expect(FakeEventSource.instances.length).toBe(1);
+  });
+
+  it("doua erori consecutive produc O SINGURA reincercare programata", async () => {
+    // Fara gardul pe timerul deja programat, fiecare eroare ar adauga inca o
+    // reconectare si ar inmulti conexiunile.
+    vi.useFakeTimers();
+    resultOf(["ok"]);
+    await renderHook();
+
+    await act(async () => {
+      FakeEventSource.instances[0].emitError();
+      FakeEventSource.instances[0].emitError();
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+
+    expect(FakeEventSource.instances.length).toBe(2);
+  });
+
+  it("dupa unmount, un timer deja programat NU mai conecteaza si nu mai cere sesiune", async () => {
+    vi.useFakeTimers();
+    resultOf(["error", "ok"]);
+    const { useAlertsStream } = await import("@/hooks/useAlertsStream");
+    function Probe() {
+      useAlertsStream();
+      return null;
+    }
+    await act(async () => {
+      root.render(<Probe />);
+    });
+
+    const callsBeforeUnmount = calls.length;
+    await act(async () => {
+      root.render(<></>);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
+    });
+
+    expect(calls.length).toBe(callsBeforeUnmount);
+    expect(FakeEventSource.instances.length).toBe(0);
   });
 });
