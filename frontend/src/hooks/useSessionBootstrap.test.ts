@@ -254,7 +254,11 @@ describe("useSessionBootstrap — reincercari marginite", () => {
       await vi.advanceTimersByTimeAsync(10000);
     });
 
-    expect(mockSync.mock.calls[0][0]).toBeUndefined();
+    // FIECARE incercare primeste semnal, inclusiv prima: terminarea trebuie sa fie
+    // o proprietate a hook-ului, nu una mostenita de la plafonul intern al
+    // bridge-ului. Daca acela dispare intr-o editare viitoare, garantia de montare
+    // ramane in picioare.
+    expect(mockSync.mock.calls[0][0]).toBeInstanceOf(AbortSignal);
     expect(mockSync.mock.calls[1][0]).toBeInstanceOf(AbortSignal);
     h.unmount();
   });

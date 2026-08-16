@@ -7,11 +7,20 @@ import { syncWebSession, type SyncSessionResult } from "@/lib/api";
 // owner), there is no cookie handshake — mark ready synchronously from the
 // initial state so the desktop app renders with zero flash and zero fetch.
 //
-// Web (browser): mint the session cookie once via syncWebSession(). The render
-// gate in App keeps the authenticated shell (Sidebar /me, search, alerts SSE)
-// from mounting until this settles, so the first request carries the cookie
-// instead of racing it into a 401 "Token de autentificare necesar.". Runs
-// exactly once (ref guard, safe under React StrictMode's double-invoke).
+// Web (browser): mint the session cookie via syncWebSession(). The render gate in
+// App keeps the authenticated shell (Sidebar /me, search, alerts SSE) from
+// mounting until this settles, so the first request carries the cookie instead of
+// racing it into a 401 "Token de autentificare necesar.". Handshake-ul porneste o
+// singura data (ref guard, safe under React StrictMode's double-invoke), dar poate
+// face pana la trei incercari — vezi reincercarile marginite de mai jos.
+//
+// INVARIANT de tinut minte: sync-urile de AICI cheama `syncWebSession` direct, deci
+// NU sunt urmarite de `beginLogout` si nu vad `logoutInProgress` (acelea gardeaza
+// `ensureWebSession`). E sigur doar cat timp ecranele dinainte de `ready` nu au
+// nicio actiune de cont: pana atunci se randeaza doar ecranul de conectare, iar
+// dupa `ready` bootstrap-ul e inert. Daca vreodata un ecran de boot primeste buton
+// de delogare, un sync in zbor ar re-minti cookie-ul DUPA delogare — exact
+// resurectia inchisa pe celelalte cai.
 export interface SessionBootstrap {
   ready: boolean;
   status: SyncSessionResult;
@@ -37,12 +46,20 @@ function isDesktopRuntime(): boolean {
 // neconditionata dupa epuizarea lui.
 const RETRY_DELAYS_MS = [1000, 2000] as const;
 
-// Plafon propriu, mai scurt, pe REINCERCARI. Prima incercare pastreaza cele 10s
-// implicite ale bridge-ului; daca ea a expirat, upstream-ul atarna (nu refuza), si
-// nu are rost ca fiecare reincercare sa mai astepte inca 10s. Fara asta, cazul
-// "backend blocat" tinea utilizatorul pe ecranul de asteptare ~33s in loc de ~10s
-// cat era inainte de acest pas — o degradare a unui caz-margine, adusa chiar de
-// fixul care trebuia sa ajute.
+// Plafoane DETINUTE DE HOOK, nu mostenite de la bridge.
+//
+// Garantia "aplicatia porneste intotdeauna" nu are voie sa depinda de faptul ca
+// `syncWebSession` isi pune singur un plafon intern: azi si-l pune, dar o editare
+// viitoare care il scoate ar transforma tacut ecranul de asteptare in permanent,
+// si suita ar ramane verde. Trecand un semnal la FIECARE incercare, terminarea e
+// o proprietate a acestui hook.
+//
+// Prima incercare pastreaza 10s (cat plafonul implicit de pana acum); reincercarile
+// primesc 3s — daca prima a expirat, upstream-ul atarna in loc sa refuze, si nu are
+// rost sa mai astepte inca 10s de doua ori. Fara diferentiere, cazul "backend
+// blocat" tinea utilizatorul pe ecran ~33s in loc de ~10s cat era inainte de acest
+// pas: o degradare a unui caz-margine, adusa chiar de fixul care trebuia sa ajute.
+const FIRST_ATTEMPT_TIMEOUT_MS = 10_000;
 const RETRY_ATTEMPT_TIMEOUT_MS = 3000;
 
 // Doar esecurile tranzitorii se reincearca. `not_provisioned` (cont inexistent
@@ -76,7 +93,7 @@ export function useSessionBootstrap(): SessionBootstrap {
     cancelled.current = false;
 
     const attempt = (index: number): void => {
-      const signal = index === 0 ? undefined : AbortSignal.timeout(RETRY_ATTEMPT_TIMEOUT_MS);
+      const signal = AbortSignal.timeout(index === 0 ? FIRST_ATTEMPT_TIMEOUT_MS : RETRY_ATTEMPT_TIMEOUT_MS);
       void syncWebSession(signal)
         .then((result) => {
           if (cancelled.current) return;
