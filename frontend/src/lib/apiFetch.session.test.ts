@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { apiFetch, beginLogout, ensureWebSession, resetLogoutStateForTests } from "./api";
+import { apiFetch, beginLogout, ensureWebSession, resetLogoutStateForTests, syncWebSession } from "./api";
 
 const SYNC = "/api/v1/auth/oauth2/sync";
 
@@ -282,5 +282,49 @@ describe("apiFetch 401 session recovery", () => {
 
     expect(res.status).toBe(200);
     expect(fetchMock.mock.calls.map((c) => String(c[0]))).toContain(SYNC); // pathname is /api/v1/me -> re-mint ran
+  });
+  // Bootstrap-ul cheama `syncWebSession` DIRECT, ocolind `ensureWebSession` - deci nu
+  // vede gardul de delogare si nu e asteptat de `beginLogout`. O fila secundara aflata
+  // in pornire in timp ce alta face delogare minteste o sesiune PROASPATA, deci
+  // nerevocata, chiar inainte ca iesirea sa stearga cookie-ul portii.
+  it("web: dupa beginLogout(), un sync de bootstrap NU mai minteste sesiune", async () => {
+    setDesktop(false);
+    const fetchMock = vi.fn(() => Promise.resolve({ ok: true, status: 200 } as Response));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await beginLogout();
+    const outcome = await syncWebSession();
+
+    expect(outcome).toBe("error");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("web: beginLogout() asteapta si un sync de bootstrap deja pornit", async () => {
+    setDesktop(false);
+    let release: ((r: Response) => void) | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            release = resolve;
+          })
+      )
+    );
+
+    const inFlight = syncWebSession();
+    await Promise.resolve();
+
+    let settled = false;
+    const pending = beginLogout().then(() => {
+      settled = true;
+    });
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+    expect(settled).toBe(false);
+
+    release?.({ ok: true, status: 200 } as Response);
+    await inFlight;
+    await pending;
+    expect(settled).toBe(true);
   });
 });
