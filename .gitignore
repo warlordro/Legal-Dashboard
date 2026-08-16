@@ -94,3 +94,7 @@ mcps/
 
 # Lock-ul de single-instance scris de Electron la runtime
 .instance.lock
+
+# Configurare locala de unelte AI - nu priveste aplicatia, difera de la om la om
+.agents/
+.codex/

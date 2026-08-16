@@ -1,5 +1,34 @@
 # Changelog - Legal Dashboard
 
+## v2.46.1 - 2026-08-17
+
+Release de corectii pentru modul web, fara feature nou. Doua zone: suprafata de securitate a
+deployment-ului si stabilitatea sesiunii web.
+
+**Securitate.** Bypass-ul `X-Forwarded-Uri` (CVE-2026-40575) era inchis doar partial: fixul
+acopera acum toate cele trei stive versionate in repo (Traefik, Caddy/VPS, NAS), fiecare ingress
+golind antetul, nu doar una. Pagina de confirmare a delogarii era declarata publica DOAR in
+stack-ul de NAS — pe celelalte doua, butonul de iesire intra in bucla: te deloghezi, pagina de
+confirmare cere autentificare, iar Google te reconecteaza instant. Delogarea opreste acum si
+sincronizarile pornite direct la initializare, nu doar pe cele dedupate. Auditul nu mai numara
+antetul `Authorization: Basic` injectat de proxy drept credential al clientului.
+
+**Pornirea aplicatiei.** O eroare temporara de infrastructura la sincronizarea initiala nu mai
+blocheaza montarea interfetei — utilizatorul ajunge la un ecran utilizabil in loc sa ramana pe
+"se conecteaza" la infinit. Reincercarile de pornire au plafon propriu, detinut de hook, cu
+montare garantata dupa plafon si plasa daca sincronizarea ar arunca.
+
+**Fluxul de alerte.** Sesiunea e asigurata la PRIMA conectare a stream-ului, nu doar la
+reconectare; se iese din bucla de refuzuri cand euristica de prospetime a sesiunii minte; iar
+asteptarea dintre reincercari nu se mai reseteaza la o conexiune care palpaie.
+
+**Audit.** `tokenPresent` pe `auth.denied` separa "fara credential" de "credential invalid".
+Cookie-ul de sesiune se detecteaza cu parserul real, nu prin cautare de substring.
+
+**Teste.** Testele de configurare de deploy nu-si mai aleg fisierele dupa setarea pe care o
+verifica si citesc ASIGNAREA reala a setarii, nu prima linie care ii contine numele — un
+comentariu nu mai satisface asertia.
+
 ## v2.46.0 - 2026-08-16
 
 Un singur feature, cerut de integratorul care consuma API-ul RNPM prin token: detaliile avizelor pot veni direct in raspunsul cautarii, in loc sa fie cerute una cate una dupa aceea.

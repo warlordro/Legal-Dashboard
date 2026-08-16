@@ -41,6 +41,42 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.46.1",
+    date: "17 August 2026",
+    subtitle:
+      "Corectii pentru varianta web: o portita de ocolire a login-ului inchisa peste tot, butonul de iesire reparat, si aplicatia porneste acum si cand verificarea initiala a sesiunii esueaza temporar.",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-red-500",
+    badgeClass: "bg-red-100 text-red-900 dark:bg-red-900/30 dark:text-red-300",
+    sections: [
+      {
+        title: "Portita de ocolire a login-ului, inchisa peste tot",
+        content:
+          "Exista o cale prin care un vizitator putea pacali poarta de autentificare sa creada ca cere o pagina publica si sa treaca de login pe orice adresa. Blocarea exista, dar doar intr-una din cele trei configuratii de server folosite. Acum e in toate trei. Aplicatia isi verifica oricum utilizatorii pe cont propriu, deci nu au fost expuse date.",
+      },
+      {
+        title: "Butonul de iesire nu mai intra in bucla",
+        content:
+          "Pagina de confirmare a delogarii era declarata publica doar in configuratia de NAS. Pe celelalte doua, dupa delogare pagina cerea din nou autentificare, iar contul Google te reconecta instant — parea ca butonul nu face nimic. In plus, delogarea opreste acum si sincronizarile pornite la deschiderea aplicatiei.",
+      },
+      {
+        title: "Aplicatia porneste chiar daca verificarea sesiunii esueaza",
+        content:
+          "Daca serverul raspundea cu o eroare temporara la prima verificare a sesiunii, puteai ramane pe ecranul de asteptare la nesfarsit. Acum incercarile au un plafon de timp, iar dupa el interfata se afiseaza oricum.",
+      },
+      {
+        title: "Alerte mai stabile",
+        content:
+          "Fluxul de alerte isi asigura sesiunea de la prima conectare, nu doar cand se reconecteaza, si nu mai intra in bucla de incercari refuzate. Pauza dintre reincercari nu se mai reseteaza cand conexiunea palpaie.",
+      },
+      {
+        title: "Jurnal de activitate mai exact",
+        content:
+          "Un acces refuzat arata acum daca vizitatorul chiar a trimis un credential sau nu a trimis niciunul, ceea ce separa o incercare de patrundere de o simpla lipsa de autentificare. Doua erori de citire a sesiunii au fost corectate.",
+      },
+    ],
+  },
+  {
     version: "v2.46.0",
     date: "16 August 2026",
     subtitle:
