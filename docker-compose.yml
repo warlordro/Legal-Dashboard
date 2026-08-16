@@ -46,7 +46,13 @@ services:
       OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
       OAUTH2_PROXY_SET_AUTHORIZATION_HEADER: "false"
       OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
-      OAUTH2_PROXY_SKIP_AUTH_ROUTES: "GET=^/health$$,GET=^/api/v1/auth/oauth2/sync$$"
+      # `/delogat` TREBUIE sa fie public: e pagina de confirmare pe care aterizezi
+      # DUPA sign_out, cand nu mai ai sesiune. Gate-uita, ar cere autentificare, iar
+      # cu SKIP_PROVIDER_BUTTON Google te re-logheaza instant - butonul de iesire ar
+      # parea ca nu face nimic, fara nicio eroare vizibila.
+      # ATENTIE LA DEPLOY: e variabila de mediu pe ACEST container, deci un redeploy
+      # care reface doar imaginea backend NU o aplica - oauth2-proxy trebuie recreat.
+      OAUTH2_PROXY_SKIP_AUTH_ROUTES: "GET=^/health$$,GET=^/api/v1/auth/oauth2/sync$$,GET=^/delogat$$"
       # Fix 2026-07-02: OAUTH2_PROXY_INJECT_REQUEST_HEADERS nu exista ca flag in
       # oauth2-proxy v7.7.1 (confirmat din --help in container: absent). Mecanismul
       # real, standard, pentru a trece un secret static la upstream e pass-basic-auth
